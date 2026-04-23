@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: docker.io/mongo:latest
+    container_name: tvet_mongodb
+    ports:
+      - "27017:27017"
+    # Tambah :Z di hujung untuk SELinux permission (wajib untuk sistem berasaskan RHEL/Fedora)
+    volumes:
+      - mongodb_data:/data/db:Z
+    restart: always
+
+  backend:
+    build: 
+      context: .
+      dockerfile: Containerfile.backend
+    container_name: tvet_backend
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - MONGO_URI=mongodb://mongodb:27017/tvet_besut
+      - JWT_SECRET=tukar_kepada_secret_anda
+      - ML_API_URL=http://ml-api:8000
+    depends_on:
+      - mongodb
+    restart: always
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Containerfile.frontend
+    container_name: tvet_frontend
+    # Guna port 8080 sebab Podman rootless tak benarkan port 80 di host OS
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: always
+
+  ml-api:
+    build:
+      context: ./ML
+      dockerfile: Containerfile
+    container_name: tvet_ml_api
+    ports:
+      - "8000:8000"
+    restart: always
+
+volumes:
+  mongodb_data:

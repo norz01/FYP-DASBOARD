@@ -1,0 +1,9 @@
+# .dockerignore
+node_modules
+dist
+ML
+.git
+.env
+*.tar
+db/sedut_mdb_tulen.py
+db/ekstrak_mdb.py

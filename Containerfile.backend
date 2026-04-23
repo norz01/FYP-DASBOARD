@@ -1,0 +1,22 @@
+# Containerfile.backend
+FROM docker.io/node:20-alpine
+
+WORKDIR /app
+
+# Copy package.json & install dependencies
+COPY package*.json ./
+RUN npm install --production # Tambah --production supaya tak install devDependencies
+
+# Copy semua fail backend
+COPY server.js auth.js auth.model.js items.js item.model.js seed.js ./
+COPY models/ ./models/
+COPY db/ ./db/ 
+COPY middleware/ ./middleware/
+
+# Default Env (boleh di-override semasa podman run)
+ENV PORT=5000
+ENV MONGO_URI=mongodb://localhost:27017/ikmb-dashboard
+
+EXPOSE 5000
+
+CMD ["node", "server.js"]
