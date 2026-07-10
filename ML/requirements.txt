@@ -5,3 +5,4 @@ joblib
 pydantic
 pandas  
 numpy
+pytest
