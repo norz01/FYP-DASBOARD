@@ -5,13 +5,10 @@ WORKDIR /app
 
 # Copy package.json & install dependencies
 COPY package*.json ./
-RUN npm install --production # Tambah --production supaya tak install devDependencies
+RUN npm install --production
 
-# Copy semua fail backend
-COPY server.js auth.js auth.model.js items.js item.model.js seed.js ./
-COPY models/ ./models/
-COPY db/ ./db/ 
-COPY middleware/ ./middleware/
+# Copy semua fail backend (since context is now ./backend)
+COPY . .
 
 # Default Env (boleh di-override semasa podman run)
 ENV PORT=5000

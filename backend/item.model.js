@@ -1,10 +1,10 @@
 import Student from './models/Student.js';
 
 const certificationScores = {
-  Tiada: 35,
-  CompTIA: 70,
-  'Cisco CCNA': 85,
-  'AWS Cloud': 90,
+ 'Tiada': 35,
+ 'CompTIA': 70,
+ 'Cisco CCNA': 85,
+ 'AWS Cloud': 90,
 };
 
 function normaliseStudent(record) {
@@ -28,6 +28,12 @@ function normaliseStudent(record) {
     assignedRisk = 'Rendah';
   }
 
+  const history = (record.academicHistory || []).map(h => ({
+    semester: h.semester,
+    cgpa: Number(h.cgpa) || 0,
+    attendance: Number(h.attendance) || 0
+  }));
+
   return {
     id: record.ID_Pelajar,
     nama: record.Nama || "Pelajar IKMB",
@@ -48,8 +54,9 @@ function normaliseStudent(record) {
     plo9: Number(record.PLO_9) || 0,
     certification: record.Sijil_Profesional || 'Tiada',
     certificationScore: certificationScores[record.Sijil_Profesional] ?? 50,
-    dropoutRisk: assignedRisk,
-    careerStatus: 'Pelajar',
+  dropoutRisk: assignedRisk,
+  careerStatus: 'Pelajar',
+  academicHistory: history,
   };
 }
 
@@ -80,7 +87,7 @@ function buildInsight(metrics, student) {
   if (weakestMetric.value === 0) {
     return {
       weakestSkill: weakestMetric.label,
-      message: `Nota: Penilaian untuk "${weakestMetric.label}" belum direkodkan sepenuhnya dalam sistem Senat. AI tidak dapat membuat analisa tepat untuk kemahiran ini sehingga markah dimasukkan.`,
+      message: `Nota: Penilaian untuk "${weakestMetric.label}" belum direkodkan sepenuhnya. AI tidak dapat membuat analisa tepat.`,
     };
   }
 
@@ -89,51 +96,49 @@ function buildInsight(metrics, student) {
 
   return {
     weakestSkill: weakestMetric.label,
-    message: `Berdasarkan analisis, "${weakestMetric.label}" adalah kemahiran terlemah (${weakestMetric.value}%). Pelajar ini dikategorikan berisiko ${student.dropoutRisk.toLowerCase()} dan memerlukan intervensi dalam subjek berkaitan.`,
+    message: `Berdasarkan analisis, "${weakestMetric.label}" adalah kemahiran terlemah (${weakestMetric.value}%). Risiko ${student.dropoutRisk.toLowerCase()} dan ${priorityText}.`,
   };
 }
 
-async function getRealAIPrediction(student) {
+// Refactored to accept generic features for manual prediction
+export async function getRealAIPrediction(features) {
   try {
     const aiResponse = await fetch('http://127.0.0.1:8000/predict/risk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        CGPA: student.cgpa,
-        Attendance: student.attendance,
-        PLO_1: student.plo1,
-        PLO_2: student.plo2,
-        PLO_3: student.plo3,
-        PLO_4: student.plo4,
-        PLO_5: student.plo5,
-        PLO_6: student.plo6,
-        PLO_7: student.plo7,
-        PLO_8: student.plo8,
-        PLO_9: student.plo9,
-        Sijil: student.certification || 'Tiada'
+        CGPA: features.cgpa,
+        Attendance: features.attendance,
+        PLO_1: features.plo1,
+        PLO_2: features.plo2,
+        PLO_3: features.plo3,
+        PLO_4: features.plo4,
+        PLO_5: features.plo5,
+        PLO_6: features.plo6,
+        PLO_7: features.plo7,
+        PLO_8: features.plo8,
+        PLO_9: features.plo9,
+        Sijil: features.certification || 'Tiada'
       })
     });
 
-    if (!aiResponse.ok) throw new Error('AI Server responded with an error');
+    if (!aiResponse.ok) throw new Error('AI Server error');
 
     const data = await aiResponse.json();
-    
-    const rawPrediction = data.prediction || data.result || "Sederhana"; 
+    const rawPrediction = data.prediction || data.result || 'Sederhana';
 
     const predictionMap = {
-      "Bermasalah": "Tinggi",
-      "Sederhana": "Sederhana",
-      "Cemerlang": "Rendah"
+      Bermasalah: 'Tinggi',
+      Sederhana: 'Sederhana',
+      Cemerlang: 'Rendah'
     };
 
-    const finalResult = predictionMap[rawPrediction] || rawPrediction;
-    
-    console.log(`🤖 AI Prediction for ${student.id}: ${rawPrediction} -> ${finalResult}`);
-    return finalResult;
-
+    return predictionMap[rawPrediction] || rawPrediction;
   } catch (error) {
-    console.error(`❌ AI Prediction failed for ${student.id}:`, error.message);
-    return student.dropoutRisk; 
+    console.error(`❌ AI Prediction failed:`, error.message);
+    if (features.attendance < 80 || features.cgpa < 2.0) return 'Tinggi';
+    if (features.cgpa >= 3.5) return 'Rendah';
+    return 'Sederhana';
   }
 }
 

@@ -17,7 +17,12 @@ const studentSchema = new mongoose.Schema({
   PLO_7: String,
   PLO_8: String,
   PLO_9: String,
-  Status_Pelajar: String
+  Status_Pelajar: String,
+  academicHistory: [{
+    semester: Number,
+    cgpa: String,
+    attendance: String
+  }]
 });
 
 export default mongoose.model('Student', studentSchema);

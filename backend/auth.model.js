@@ -1,29 +1,16 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from './models/User.js';
-import { getAllStudents } from './item.model.js';
 
-// Replaced fs.readFile with MongoDB query
+// Fetch all users directly from MongoDB (where passwords are hashed)
 async function readLoginDatabase() {
   const records = await User.find({});
   return records.map((record) => ({
     email: String(record.email).toLowerCase(),
-    password: String(record.password),
+    password: String(record.password), // This is now the hashed password from DB
     role: record.role,
     displayName: record.displayName,
     studentId: record.studentId ?? null,
-    source: 'mongodb-login',
-  }));
-}
-
-function buildStudentLoginAccounts(students) {
-  return students.map((student) => ({
-    email: `${student.id.toLowerCase()}@student.ikmb.edu.my`,
-    password: 'password123',
-    role: 'user',
-    displayName: `Pelajar ${student.id}`,
-    studentId: student.id,
-    source: 'dummy-student-db',
   }));
 }
 
@@ -33,27 +20,12 @@ function sanitiseUser(user) {
     role: user.role,
     displayName: user.displayName,
     studentId: user.studentId,
-    source: user.source,
   };
 }
 
 export async function getAllLoginUsers() {
-  const [defaultUsers, students] = await Promise.all([
-    readLoginDatabase(),
-    getAllStudents(),
-  ]);
-
-  const mergedByEmail = new Map();
-
-  for (const user of buildStudentLoginAccounts(students)) {
-    mergedByEmail.set(user.email, user);
-  }
-
-  for (const user of defaultUsers) {
-    mergedByEmail.set(user.email, user);
-  }
-
-  return Array.from(mergedByEmail.values());
+  // We no longer need to merge with a dummy array. Just fetch from DB.
+  return await readLoginDatabase();
 }
 
 export async function getPublicLoginUsers() {
@@ -68,13 +40,8 @@ export async function authenticateUser(email, password) {
   const user = users.find((entry) => entry.email === normalisedEmail);
   if (!user) return null;
 
-  let isMatch = false;
-  if (user.source === 'dummy-student-db') {
-    isMatch = (password === 'password123'); 
-  } else {
-    isMatch = await bcrypt.compare(password, user.password);
-  }
-
+  // All passwords in the DB are hashed, so we always use bcrypt.compare
+  const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) return null;
 
   const token = jwt.sign(

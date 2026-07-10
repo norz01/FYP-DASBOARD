@@ -1,0 +1,69 @@
+name: TVETMARA CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  # --- 1. FRONTEND TEST & BUILD ---
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Dependencies
+        run: npm install
+      - name: Run Frontend Tests
+        run: npm test
+      - name: Build Frontend
+        run: npm run build
+
+  # --- 2. BACKEND TEST ---
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Dependencies
+        run: cd backend && npm install
+      - name: Run Backend Tests
+        run: cd backend && npm test
+
+  # --- 3. ML SERVICE TEST ---
+  ml-service:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Install Dependencies
+        run: |
+          cd ML
+          pip install -r requirements.txt
+      - name: Run ML Tests
+        run: |
+          cd ML
+          pytest test_ml.py
+
+  # --- 4. DOCKER BUILD (Only if tests pass) ---
+  docker-build:
+    needs: [frontend, backend, ml-service]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Frontend Image
+        run: docker build -f Containerfile.frontend -t tvet-frontend:latest .
+      - name: Build Backend Image
+        run: docker build -f backend/Containerfile.backend -t tvet-backend:latest ./backend
+      - name: Build ML Image
+        run: docker build -f ML/Containerfile -t tvet-ml-api:latest ./ML

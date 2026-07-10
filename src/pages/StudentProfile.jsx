@@ -7,7 +7,6 @@ import {
 import { Bar, Radar } from 'react-chartjs-2';
 import { getToken } from '../utils/auth';
 
-// Register ChartJS
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, RadialLinearScale, Title, Tooltip, Legend, Filler);
 
 const getFullCourseName = (code) => {
@@ -35,20 +34,16 @@ export default function StudentProfile() {
     useEffect(() => {
         const fetchSkillGap = async () => {
             try {
-                // Dapatkan token menggunakan fungsi dari auth.js
                 const token = getToken(); 
-                
                 const response = await fetch(`/api/students/${studentId}/skill-gap`, {
                     method: 'GET',
                     headers: {
-                        'Authorization': `Bearer ${token}`, // Hantar token yang sah
+                        'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json'
                     }
                 });
 
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    console.error("Server Error:", response.status, errorData);
                     throw new Error('Tiada data pelajar dijumpai untuk akaun ini.');
                 }
                 
@@ -62,32 +57,47 @@ export default function StudentProfile() {
         };
 
         fetchSkillGap();
-    },[studentId]);
+    }, [studentId]);
 
-    // DATA UNTUK GRAF TREND (Campuran Bar & Line)
-    const trendData = {
-        labels:['Bulan 1', 'Bulan 2', 'Bulan 3', 'Bulan 4', 'Bulan 5'],
-        datasets:[
-            {
-                type: 'line',
-                label: 'Skor Akademik (%)',
-                data:[75, 70, 65, 58, 55],
-                borderColor: '#EF4444',
-                backgroundColor: '#EF4444',
-                borderWidth: 2,
-                tension: 0.3
-            },
-            {
-                type: 'bar',
-                label: 'Kehadiran (%)',
-                data:[95, 90, 85, 75, 70],
-                backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                borderColor: '#3B82F6',
-                borderWidth: 1,
-                borderRadius: 4
-            }
-        ]
-    };
+    // Dynamic Colors based on Risk
+    const riskLevel = skillGap?.student?.dropoutRisk;
+    const insightColor = riskLevel === 'Rendah' ? 'text-green-400' : riskLevel === 'Sederhana' ? 'text-yellow-400' : 'text-red-400';
+    const insightBar = riskLevel === 'Rendah' ? 'bg-green-500' : riskLevel === 'Sederhana' ? 'bg-yellow-500' : 'bg-red-500';
+    const avatarBg = riskLevel === 'Rendah' ? 'bg-green-500' : riskLevel === 'Sederhana' ? 'bg-yellow-500' : 'bg-red-500';
+
+    // Correct Employability Calculation
+    const employabilityScore = skillGap?.student ? Math.min(100, Math.round((skillGap.student.cgpa / 4) * 40 + (skillGap.student.attendance * 0.6))) : 0;
+
+// DATA UNTUK GRAF TREND (Real Data with Fallback)
+const historyData = skillGap?.student?.academicHistory || [];
+const labels = historyData.length > 0 ? historyData.map(h => `Sem ${h.semester}`) : ['Semasa'];
+const cgpaData = historyData.length > 0 ? historyData.map(h => h.cgpa) : [skillGap?.student?.cgpa || 0];
+const attendanceData = historyData.length > 0 ? historyData.map(h => h.attendance) : [skillGap?.student?.attendance || 0];
+const trendData = {
+labels: labels,
+datasets:[
+{
+type: 'line',
+label: 'CGPA',
+data: cgpaData,
+borderColor: '#2563EB',
+backgroundColor: '#2563EB',
+borderWidth: 2,
+tension: 0.3,
+yAxisID: 'y',
+},
+{
+type: 'bar',
+label: 'Kehadiran (%)',
+data: attendanceData,
+backgroundColor: 'rgba(16, 185, 129, 0.2)',
+borderColor: '#10B981',
+borderWidth: 1,
+borderRadius: 4,
+yAxisID: 'y1',
+}
+]
+};
 
     // DATA UNTUK GRAF RADAR
     const skillData = skillGap ? {
@@ -97,18 +107,18 @@ export default function StudentProfile() {
                 label: `Data Pelajar (${studentId})`,
                 data: skillGap.chart.current,
                 fill: true,
-                backgroundColor: 'rgba(239, 68, 68, 0.2)',
-                borderColor: '#EF4444',
-                pointBackgroundColor: '#EF4444'
+                backgroundColor: 'rgba(37, 99, 235, 0.2)',
+                borderColor: '#2563EB',
+                pointBackgroundColor: '#2563EB'
             }, 
             {
                 label: 'Target Kursus',
                 data: skillGap.chart.target,
                 fill: true,
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                borderColor: '#3B82F6',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                borderColor: '#10B981',
                 borderDash: [5, 5],
-                pointBackgroundColor: '#3B82F6'
+                pointBackgroundColor: '#10B981'
             }
         ]
     } : null;
@@ -118,7 +128,6 @@ export default function StudentProfile() {
     return (
         <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans pb-20">
             
-            {/* TOP NAV (Back Button) */}
             <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
                 <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
                     <button onClick={() => navigate('/staff-dashboard')} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-medium transition-colors">
@@ -142,7 +151,7 @@ export default function StudentProfile() {
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             {/* Info Pelajar */}
                             <div className="lg:col-span-2 bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-slate-100 flex flex-col md:flex-row gap-6 items-start md:items-center">
-                                <div className="w-24 h-24 md:w-32 md:h-32 rounded-full border-4 border-slate-50 shadow-md bg-red-400 flex items-center justify-center text-white text-4xl font-bold">
+                                <div className={`w-24 h-24 md:w-32 md:h-32 rounded-full border-4 border-slate-50 shadow-md ${avatarBg} flex items-center justify-center text-white text-4xl font-bold`}>
                                     {studentId.slice(-2)}
                                 </div>
                                 <div className="flex-1">
@@ -151,11 +160,11 @@ export default function StudentProfile() {
                                             {skillGap?.student.nama || `Pelajar ${studentId}`}
                                         </h1>
                                         <span className={`border px-3 py-1 rounded-full text-xs font-bold ${
-                                            skillGap?.student.dropoutRisk === 'Tinggi' ? 'bg-red-100 text-red-700 border-red-200' : 
-                                            skillGap?.student.dropoutRisk === 'Rendah' ? 'bg-green-100 text-green-700 border-green-200' : 
+                                            riskLevel === 'Tinggi' ? 'bg-red-100 text-red-700 border-red-200' : 
+                                            riskLevel === 'Rendah' ? 'bg-green-100 text-green-700 border-green-200' : 
                                             'bg-yellow-100 text-yellow-700 border-yellow-200'
                                         }`}>
-                                            {skillGap?.student.dropoutRisk}
+                                            {riskLevel}
                                         </span>
                                         {skillGap?.student.anugerah && (
                                             <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-bold border border-amber-200 flex items-center gap-1">
@@ -188,11 +197,11 @@ export default function StudentProfile() {
                                     <i className="ph-fill ph-robot"></i> Ramalan Kebolehpasaran (AI)
                                 </h3>
                                 <div className="flex items-end gap-2 mb-4">
-                                    <span className="text-5xl font-bold text-red-400">{Math.round((skillGap.student.cgpa / 4) * 100)}%</span>
+                                    <span className={`text-5xl font-bold ${insightColor}`}>{employabilityScore}%</span>
                                     <span className="text-slate-400 text-sm mb-1">/ 100%</span>
                                 </div>
                                 <div className="w-full bg-slate-700 h-2 rounded-full overflow-hidden mb-4">
-                                    <div className="bg-red-500 h-full rounded-full" style={{width: `${Math.round((skillGap.student.cgpa / 4) * 100)}%`}}></div>
+                                    <div className={`${insightBar} h-full rounded-full transition-all duration-500`} style={{width: `${employabilityScore}%`}}></div>
                                 </div>
                                 <p className="text-xs text-slate-400 leading-relaxed">
                                     {skillGap.insight.message}
@@ -207,7 +216,7 @@ export default function StudentProfile() {
                                     <h3 className="font-bold text-slate-800">Sejarah Akademik & Kehadiran</h3>
                                     <button className="text-xs font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-lg hover:bg-blue-100">Muat Turun</button>
                                 </div>
-                                <div className="h-64 w-full"><Bar data={trendData} options={{ maintainAspectRatio: false }} /></div>
+                                <div className="h-64 w-full"><Bar data={trendData} options={{ maintainAspectRatio: false, scales: { y: { type: 'linear', display: true, position: 'left', max: 4, title: { display: true, text: 'CGPA' } }, y1: { type: 'linear', display: true, position: 'right', max: 100, title: { display: true, text: 'Kehadiran (%)' }, grid: { drawOnChartArea: false } } } }} /></div>
                             </div>
 
                             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -221,21 +230,21 @@ export default function StudentProfile() {
                                 </div>
                                 <div className="h-64 w-full flex flex-col items-center">
                                     {skillData && <Radar 
-        data={skillData} 
-        options={{ 
-            maintainAspectRatio: false,
-            scales: {
-                r: {
-                    min: 0,
-                    max: 100,
-                    beginAtZero: true,
-                    ticks: {
-                        stepSize: 20
-                    }
-                }
-            }
-        }} 
-    />}
+                                        data={skillData} 
+                                        options={{ 
+                                            maintainAspectRatio: false,
+                                            scales: {
+                                                r: {
+                                                    min: 0,
+                                                    max: 100,
+                                                    beginAtZero: true,
+                                                    ticks: {
+                                                        stepSize: 20
+                                                    }
+                                                }
+                                            }
+                                        }} 
+                                    />}
                                     {hasZeroScore && (
                                         <p className="text-[10px] text-slate-400 mt-2 italic">* Skor 0% mungkin disebabkan penilaian PLO belum direkodkan oleh pensyarah.</p>
                                     )}

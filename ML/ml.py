@@ -1,25 +1,20 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import joblib  # NEW: We use joblib instead of pickle
+import joblib
 import pandas as pd
-import os
+import numpy as np
 
-# Initialize FastAPI app
-app = FastAPI(title="TVETMARA AI Prediction API")
+app = FastAPI(title="TVETMARA AI Prediction API V3")
 
-# Load the AI Model
-# Adjust the path if necessary depending on where you run the script
-MODEL_PATH = "model_ai_risiko_lengkap_v2.pkl"
+MODEL_PATH = "model_ai_risiko_lengkap_v3.pkl"
 
 try:
-    # NEW: joblib loads it directly without needing 'with open(...)'
     risk_model = joblib.load(MODEL_PATH)
-    print("✅ AI Model Loaded Successfully!")
+    print("✅ AI Model V3 Loaded Successfully!")
 except Exception as e:
     print(f"❌ Error loading model: {e}")
     risk_model = None
 
-# Define the exact data structure Node.js will send us
 class StudentFeatures(BaseModel):
     CGPA: float
     Attendance: float
@@ -36,7 +31,7 @@ class StudentFeatures(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"status": "AI Server is running"}
+    return {"status": "AI Server V3 is running"}
 
 @app.post("/predict/risk")
 def predict_risk(data: StudentFeatures):
@@ -44,30 +39,25 @@ def predict_risk(data: StudentFeatures):
         raise HTTPException(status_code=500, detail="AI Model is not loaded")
 
     try:
-        sijil_mapping = {
-            "Tiada": 0,
-            "CompTIA": 1,
-            "Cisco CCNA": 2,
-            "AWS Cloud": 3
-        }
+        # Calculate Engineered Features
+        plo_values = [data.PLO_1, data.PLO_2, data.PLO_3, data.PLO_4, data.PLO_5, 
+                      data.PLO_6, data.PLO_7, data.PLO_8, data.PLO_9]
         
-        sijil_encoded = sijil_mapping.get(data.Sijil, 0)
+        plo_avg = np.mean(plo_values)
+        plo_variance = np.var(plo_values)
 
+        # Construct DataFrame with EXACT features the model was trained on
         features = pd.DataFrame([{
             "CGPA": data.CGPA,
-            "Kehadiran_Pct": data.Attendance,
-            "PLO_1": data.PLO_1,
-            "PLO_2": data.PLO_2,
-            "PLO_3": data.PLO_3,
-            "PLO_4": data.PLO_4,
-            "PLO_5": data.PLO_5,
-            "PLO_6": data.PLO_6,
-            "PLO_7": data.PLO_7,
-            "PLO_8": data.PLO_8,
-            "PLO_9": data.PLO_9,
-            "Sijil_Num": sijil_encoded
+            "Avg_Subjek_Attendance": data.Attendance, # Maps to the real dataset column name
+            "PLO_1": data.PLO_1, "PLO_2": data.PLO_2, "PLO_3": data.PLO_3,
+            "PLO_4": data.PLO_4, "PLO_5": data.PLO_5, "PLO_6": data.PLO_6,
+            "PLO_7": data.PLO_7, "PLO_8": data.PLO_8, "PLO_9": data.PLO_9,
+            "PLO_Avg": plo_avg,
+            "PLO_Variance": plo_variance
         }])
 
+        # Ensure column order matches what the model expects
         if hasattr(risk_model, 'feature_names_in_'):
             features = features[risk_model.feature_names_in_]
 

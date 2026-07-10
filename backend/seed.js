@@ -3,7 +3,6 @@ import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 
-// Guna Default Imports (tanpa kurungan dakap)
 import Student from './models/Student.js'; 
 import User from './models/User.js'; 
 
@@ -15,6 +14,11 @@ const seedDatabase = async () => {
   try {
     await mongoose.connect(MONGO_URI);
     console.log("✅ Berjaya bersambung ke MongoDB.");
+
+    // Bersihkan data lama supaya tiada konflik plain-text password
+    console.log("🗑️ Memadam data lama...");
+    await User.deleteMany({});
+    await Student.deleteMany({});
 
     const rawData = fs.readFileSync('./db/data_tvet_muktamad.json', 'utf-8');
     const students = JSON.parse(rawData);
@@ -45,10 +49,11 @@ const seedDatabase = async () => {
         PLO_6: data.PLO_6,
         PLO_7: data.PLO_7,
         PLO_8: data.PLO_8,
-        PLO_9: data.PLO_9
-      });
+  PLO_9: data.PLO_9,
+  academicHistory: data.academicHistory || []
+});
 
-      // Simpan User (Login)
+      // Simpan User (Login) dengan hashed password
       await User.create({
         email: `${data.ID_Pelajar}@student.ikmb.edu.my`,
         password: defaultPassword,
@@ -57,6 +62,24 @@ const seedDatabase = async () => {
         studentId: data.ID_Pelajar
       });
     }
+
+    // Tambah akaun Admin Default
+    console.log("👑 Menambah akaun admin...");
+    await User.create({
+      email: 'admin@ikmb.edu.my',
+      password: defaultPassword,
+      role: 'admin',
+      displayName: 'Admin IKMB',
+      studentId: null
+    });
+    
+    await User.create({
+      email: 'user@ikmb.edu.my',
+      password: defaultPassword,
+      role: 'user',
+      displayName: 'User IKMB',
+      studentId: null
+    });
 
     console.log("✨ SELESAI! Sila cuba login di Dashboard.");
     process.exit();

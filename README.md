@@ -1,166 +1,221 @@
-# 🚀 IKMB Skills & Talent Development Dashboard (AI-Enabled)
+# 🎓 TVETMARA Besut Skills Talent Development Dashboard
 
-Sistem Papan Pemuka Pintar berasaskan React.js untuk memantau, meramal, dan membangunkan bakat pelajar TVETMARA Besut menggunakan analitik AI.
+A Smart Skills & Talent Development Dashboard for TVETMARA Institut Kemahiran Mara Besut (IKMB). This Final Year Project (FYP) leverages **Artificial Intelligence (Machine Learning)** to monitor, predict, and develop student talent. It enables administrators to manage student data, view AI-driven dropout risk predictions, perform skills gap analysis, and recommend personalized learning pathways and career matches.
 
-## 🛠️ Tech Stack (Frontend)
-- **Framework:** React.js (Vite)
-- **Styling:** Tailwind CSS
-- **Routing:** React Router DOM
-- **Charts:** Chart.js & React-Chartjs-2
-- **Icons:** Phosphor Icons
+Built with a hybrid **MERN stack + Python FastAPI** architecture, the system implements a complete 4-layer analytics framework: Descriptive, Diagnostic, Predictive, and Prescriptive.
 
-## 📂 Struktur Page
-1. `/` - Muka Depan & Login
-2. `/staff-dashboard` - Papan Pemuka Admin/Pensyarah (Overview, AI Prediction, Skill Gap)
-3. `/student-dashboard` - Papan Pemuka Pelajar (Career Match, Course Recommendation)
-4. `/student-profile` - Profil Terperinci Pelajar (Intervensi AI)
+---
 
-## 💻 Cara Untuk Run Sistem (Untuk Ahli A & Ahli B)
-Sila pastikan **Node.js** telah di-install di komputer anda.
+## ✨ Key Features
 
-1. Buka terminal dan masuk ke dalam folder projek ini.
-2. Install semua pakej (dependencies) dengan arahan:
-   ```bash
-   npm install# TVETMARA-Besut-Skills-Talent-Development-Dashboard
-# Deployment Guide (MERN Stack on Ubuntu)
+### For Administrators (Staff / Penyelaras)
+- **Overview Dashboard**: KPIs for active students, average employability, and high-risk counts. Visual comparison of PLO averages vs. 80% institutional targets.
+- **AI Manual Prediction**: Input custom student metrics to generate immediate ML-based dropout risk predictions.
+- **Skills Gap Analysis**: Institutional-wide view of all 9 Program Learning Outcomes (PLOs) categorized as *Selamat*, *Perlu Peningkatan*, or *Kritikal*.
+- **Learning Pathways**: Auto-generated course and workshop recommendations mapped to the weakest PLOs.
+- **Student Management (CRUD)**: Securely add, edit, delete, and search student records.
+- **Detailed Student Profiles**: View semester-by-semester CGPA/attendance trends, PLO radar charts, AI insights, and prescriptive intervention plans.
 
-This guide provides step-by-step instructions to deploy the TVETMARA Besut Dashboard (MERN Stack) on an Ubuntu server.
+### For Students
+- **Profil & Prestasi**: Personalized dashboard showing employability score, risk status, PLO radar chart vs. target, and AI-generated diagnostic insights.
+- **Padanan Kerjaya (AI)**: AI-matched career recommendations based on the student's enrolled course.
+- **Kursus Cadangan**: Personalized course recommendations targeting the student's weakest skills.
 
-## 1. System Update & Prerequisites
-First, update your package manager and upgrade existing packages.
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install curl git build-essential nginx -y
+---
+
+## 🛠️ Technology Stack
+
+| Layer | Technologies |
+| :--- | :--- |
+| **Frontend** | React.js 19, Vite 7, Tailwind CSS 3, Chart.js (react-chartjs-2), React Router DOM 7, Phosphor Icons |
+| **Backend** | Node.js, Express.js 5, MongoDB, Mongoose 9, JWT (jsonwebtoken), bcryptjs, Swagger UI |
+| **ML Service** | Python, FastAPI, scikit-learn (RandomForestClassifier), pandas, numpy, joblib, Uvicorn |
+| **DevOps** | Docker Compose, Nginx, GitHub Actions (CI/CD) |
+
+---
+
+## 🏗️ System Architecture
+
+The system is split into three independent microservices communicating over HTTP, orchestrated via Docker Compose:
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│                     NGINX (Port 80)                       │
+│  - Serves React static files                              │
+│  - Proxies /api/* to Backend                              │
+└────────────────────┬─────────────────────────────────────┘
+                     │
+        ─────────────┼─────────────
+        │            │            │
+   ┌────▼────┐  ┌──▼───┐  ┌────▼────┐
+   │Frontend │  │Backend│  │ ML API  │
+   │React    │  │Express│  │ FastAPI │
+   │(Vite)   │  │MongoDB│  │(Python) │
+   │Port 80  │  │Port5k │  │Port 8000│
+   └─────────┘  └──▲───┘  └─────────┘
+                  │
+           ┌──────▼──────────┐
+           │   MongoDB       │
+           │   (Database)    │
+           └─────────────────┘
 ```
 
-## 2. Install Node.js & npm (via NodeSource)
-Install Node.js (Version 20.x is recommended for modern Vite/React apps).
+---
+
+## 📊 Analytics Maturity Model Implementation
+
+This project fulfills the four layers of data analytics:
+
+1. **Descriptive ("What happened?")**: PLO average scores, attendance records, CGPA bar charts.
+2. **Diagnostic ("Why did it happen?")**: AI insight messages explaining the weakest skill and the gap size.
+3. **Predictive ("What will happen?")**: ML-based dropout risk classification (`Rendah / Sederhana / Tinggi`).
+4. **Prescriptive ("What should we do?")**: Recommended workshops, career pathways, and targeted intervention cards.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Node.js (v20 or later)
+- Python (v3.9 or later)
+- MongoDB (running locally or via Docker)
+- `mdbtools` (only required if re-running the ETL pipeline on raw `.mdb` files)
+
+### 1. Clone the Repository
 ```bash
-# Fetch and install Node.js setup script
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-
-# Install Node.js
-sudo apt install -y nodejs
-
-# Verify installation
-node -v
-npm -v
+git clone https://github.com/your-username/TVETMARA-Besut-Skills-Talent-Development-Dashboard.git
+cd TVETMARA-Besut-Skills-Talent-Development-Dashboard
 ```
 
-## 3. Install MongoDB
-If your application uses a local MongoDB database, install it using the official repository.
-*(Note: If you use MongoDB Atlas, you can skip this step and just provide your connection string in `.env`)*
-
+### 2. Setup Backend & Database
 ```bash
-# Import the public key
-curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | \
-   sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
-
-# Create a list file for MongoDB
-echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-
-# Reload local package database and install MongoDB
-sudo apt update
-sudo apt install -y mongodb-org
-
-# Start and enable MongoDB service
-sudo systemctl start mongod
-sudo systemctl enable mongod
-sudo systemctl status mongod
-```
-
-## 4. Setup the Project
-Clone your repository or upload your project files to the `/var/www` directory.
-
-```bash
-# Create directory
-sudo mkdir -p /var/www/ikmb-dashboard
-sudo chown -R $USER:$USER /var/www/ikmb-dashboard
-
-# Navigate to the directory
-cd /var/www/ikmb-dashboard
-
-# (Optional) Clone from Git如果 applicable
-# git clone <your-repo-url> .
-```
-
-## 5. Install Dependencies & Build Frontend
-Install all required Node.js packages and build the React (Vite) frontend for production.
-
-```bash
-# Install dependencies
+cd backend
 npm install
-
-# Build the Vite React Frontend
-npm run build
 ```
-
-## 6. Configure Environment Variables
-Create a `.env` file in the root of the project folder. Ensure it contains the necessary variables for Express and Mongoose.
-
-```bash
-nano .env
-```
-*Example `.env`:*
+Create a `.env` file in the `backend/` directory based on `.env.example`:
 ```env
-PORT=5000
-MONGODB_URI=mongodb://127.0.0.1:27017/ikmb_db
+PORT=5001
+MONGO_URI=mongodb://127.0.0.1:27017/ikmb-dashboard
+JWT_SECRET=your_super_secret_key
 ```
-
-## 7. Start the Server with PM2
-PM2 is a production process manager for Node.js apps that keeps them alive forever.
-
+Seed the database with canonical TVETMARA data:
 ```bash
-# Install PM2 globally
-sudo npm install -g pm2
-
-# Start the Express server
-pm2 start server.js --name "ikmb-api"
-
-# Save PM2 process list to restart automatically on server boot
-pm2 save
-pm2 startup
+npm run seed
 ```
-
-## 8. Configure Nginx (Reverse Proxy)
-To access the API or the static frontend cleanly via port 80 (HTTP), set up Nginx.
-
+Start the backend server:
 ```bash
-sudo nano /etc/nginx/sites-available/ikmb-dashboard
+npm start
 ```
 
-**Paste the following configuration:**
-```nginx
-server {
-    listen 80;
-    server_name your_domain_or_IP;
-
-    # Serve built React files if server.js serves API only
-    # (If server.js handles both API + static files, just proxy everything)
-    location / {
-        proxy_pass http://localhost:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-```
-
-**Enable the site and restart Nginx:**
+### 3. Setup ML Service
+Open a new terminal and navigate to the ML directory:
 ```bash
-# Enable the configuration
-sudo ln -s /etc/nginx/sites-available/ikmb-dashboard /etc/nginx/sites-enabled/
-
-# Test Nginx syntax
-sudo nginx -t
-
-# Restart Nginx
-sudo systemctl restart nginx
+cd ML
+pip install -r requirements.txt
+```
+Start the FastAPI ML server:
+```bash
+uvicorn ml:app --host 0.0.0.0 --port 8000
 ```
 
-## Troubleshooting
-- **Check Server Logs:** `pm2 logs ikmb-api`
-- **Restart Server:** `pm2 restart ikmb-api`
-- **Check MongoDB Logs:** `sudo journalctl -u mongod`
+### 4. Setup Frontend
+Open a new terminal in the root directory:
+```bash
+npm install
+npm run dev
+```
+The application should now be running at `http://localhost:5173` (or the port specified by Vite).
+
+---
+
+## 🐳 Docker Deployment (Recommended)
+
+To run the entire stack (Frontend, Backend, ML, MongoDB) simultaneously:
+
+1. Ensure Docker and Docker Compose are installed.
+2. From the root directory, run:
+   ```bash
+   docker-compose up --build -d
+   ```
+3. Access the application at `http://localhost:8080`.
+
+---
+
+## 🔑 Default Test Accounts
+
+All seeded accounts use the password: **`password123`**
+
+| Email | Role | Access Level |
+| :--- | :--- | :--- |
+| `admin@ikmb.edu.my` | Admin | Staff Dashboard, Student Profile, CRUD |
+| `user@ikmb.edu.my` | User | Student Dashboard |
+| `{studentId}@student.ikmb.edu.my` | User | Student Dashboard (Own Data Only) |
+
+---
+
+## 🧪 Testing
+
+The project includes comprehensive testing across all layers. To run tests:
+
+**Frontend (Vitest + React Testing Library):**
+```bash
+npm test
+```
+
+**Backend (Jest + Supertest):**
+```bash
+cd backend
+npm test
+```
+
+**ML Service (Pytest + FastAPI TestClient):**
+```bash
+cd ML
+pytest
+```
+
+---
+
+## 📂 Data Pipeline (ETL & Model Training)
+
+The project includes a complete ETL pipeline transforming raw Microsoft Access data into ML-ready datasets:
+
+1. **Extract**: `ekstrak_mdb.py` exports tables from `Ekspot_Senat.mdb` to CSVs.
+2. **Transform**: `prepare_ml_data.py` merges tables, calculates `PLO_Avg` and `PLO_Variance`, and generates ground-truth labels.
+3. **History**: `extract_history.py` builds semester-by-semester academic history.
+4. **Load**: `seed.js` populates MongoDB with cleaned JSON data.
+5. **Train**: `train_and_evaluate.py` trains the `RandomForestClassifier` via GridSearchCV and saves the `.pkl` model.
+
+---
+
+## 📚 Domain Knowledge
+
+### Program Learning Outcomes (PLOs)
+The system evaluates 9 PLOs with an institutional target of **80%**.
+1. Komunikasi Efektif
+2. Pengaturcaraan
+3. Keselamatan Industri (OSH)
+4. Pengurusan Projek
+5. Inovasi Produk
+6. Kemahiran Teknikal (Motor/Elektrik)
+7. Keusahawanan Digital
+8. Etika & Kepimpinan
+9. Integriti Profesional
+
+### Course Codes
+| Code | Course |
+| :--- | :--- |
+| ITW | Diploma Kompetensi Kimpalan (Welding) |
+| DFK | Diploma Teknologi Komputer / Komputasi Awan |
+| DGA | Diploma Teknologi Automotif |
+| SLR | Sijil Teknologi Kejuruteraan Mekanikal / Lukisan Rekabentuk |
+| DCG | Diploma Kompetensi Elektrik (Industri) |
+| SED | Sijil Elektrik Domestik |
+| PPU | Diploma Penyejukan dan Penyamanan Udara |
+
+---
+
+## 📄 License
+
+This project was developed as a Final Year Project. © 2024 TVETMARA Besut.
+```
