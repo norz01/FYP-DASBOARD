@@ -1,748 +1,394 @@
-# TVETMARA Besut Skills Talent Development Dashboard
-## Project Summary
+# TVETMARA Besut Skills & Talent Development Dashboard — Complete Project Summary
+
+> Read top to bottom. Each section explains one layer of the system. No prior knowledge needed.
+> Verified against source code on 2026-08-27.
 
 ---
 
-## 1. Project Overview
+## 1. What This Project Is (The Big Picture)
 
-**TVETMARA Besut** is a Final Year Project (FYP) that builds a **Smart Skills & Talent Development Dashboard** for TVETMARA Institut Kemahiran Mara Besut (IKMB). The system is designed to monitor, predict, and develop student talent using **Artificial Intelligence (Machine Learning)** analytics. It enables administrators (staff/penyelaras) to manage student data, view AI-driven predictions on student dropout risk, perform skills gap analysis, and recommend personalized learning pathways and career matches for students.
+Full-stack web application built as a **Final Year Project (FYP)**. Malay name: **"Papan Pemuka Pintar"** (Smart Dashboard). Purpose: help staff and students of **IKMB (Institut Kemahiran MARA Besut)** — a Malaysian technical/vocational (TVET) college under MARA — do 3 things:
 
-The application is built using a **MERN stack** (MongoDB, Express.js, React.js, Node.js) with a separate **Python FastAPI ML service** integrated to provide intelligent predictions.
+1. **MONITOR** — track student academic performance: CGPA (cumulative GPA), attendance %, and 9 PLO (Programme Learning Outcome) skill scores.
+2. **PREDICT** — use a Machine Learning model (Random Forest classifier in Python) to classify each student into 3 status categories: `Cemerlang` (excellent), `Sederhana` (moderate), `Bermasalah` (problematic/at-risk).
+3. **DEVELOP** — show skills-gap analysis (which PLO is weakest vs an 80% institutional target), personalized learning-pathway suggestions, and career recommendations per course.
+
+**UI language: Bahasa Melayu.** Data source: real student records exported from the institute's legacy **Microsoft Access database** (`Ekspot_Senat.mdb`, ~11.7 MB, from the senate-export system). Python ETL scripts (using the `mdbtools` system package) convert it into MongoDB documents.
+
+**Analytics maturity model implemented:**
+1. *Descriptive* ("What happened?") — PLO averages, attendance, CGPA charts.
+2. *Diagnostic* ("Why?") — AI insight messages naming the weakest skill + gap size.
+3. *Predictive* ("What will happen?") — ML dropout-risk classification.
+4. *Prescriptive* ("What to do?") — workshop/course/intervention recommendations.
 
 ---
 
-## 2. Technology Stack
+## 2. High-Level Architecture
 
-### Frontend
-| Technology | Version | Purpose |
+Four services, orchestrated by Docker/Podman Compose (`compose.yml`) on one bridge network `tvet_net`:
+
+```
+┌───────────┐   proxy /api,/uploads  ┌──────────┐   HTTP :8000  ┌───────────┐
+│ FRONTEND  │ ─────────────────────> │ BACKEND  │ ────────────> │  ML API   │
+│ React 19  │                        │ Express  │               │  FastAPI  │
+│ + Nginx   │ <───────────────────── │ :5000    │ <──────────── │  (Python) │
+│ :8080→80  │                        └────┬─────┘               └───────────┘
+└───────────┘                             │ Mongoose ODM
+                                    ┌─────▼──────┐
+                                    │  MongoDB   │  DB name: ikmb-dashboard
+                                    │  :27017    │  volume: ./mongodb_data
+                                    └────────────┘
+```
+
+| Service | Tech stack | Port | Role |
+|---|---|---|---|
+| `frontend` | React 19, Vite 7, Tailwind CSS 3, Chart.js 4 (react-chartjs-2), React Router 7, Phosphor Icons; served by Nginx | host 8080 → container 80 | SPA UI. Nginx serves built static files, SPA fallback to `index.html`, proxies `/api/` and `/uploads/` to backend. |
+| `backend` | Node 20, Express 5, Mongoose 9, JWT (jsonwebtoken), bcryptjs, Multer 2, Swagger UI | 5000 | REST API: auth (login/JWT), student CRUD, certificate/profile-image uploads, relays MDB uploads to ML service, Swagger docs. |
+| `ml-api` | Python 3.9, FastAPI, scikit-learn, pandas, numpy, joblib, mdbtools (system package) | 8000 | AI prediction endpoint `/predict/risk` + ETL endpoint `/etl/process-mdb` (extracts Access DB). |
+| `mongodb` | `mongo:latest` | 27017 | Stores 2 collections: `students`, `users`. Data persisted to host folder `./mongodb_data` (with SELinux `:Z` flag). |
+
+---
+
+## 3. Repository Directory Map
+
+```
+/
+├── src/                          # FRONTEND React source
+│   ├── main.jsx                  # React entry (StrictMode)
+│   ├── App.jsx                   # Router + role-based route guards
+│   ├── index.css                 # Tailwind directives + Google Font import
+│   ├── App.css                   # leftover Vite template CSS (unused)
+│   ├── pages/
+│   │   ├── Login.jsx             # split-screen login page
+│   │   ├── StaffDashboard.jsx    # admin dashboard, 6 tabs
+│   │   ├── StudentDashboard.jsx  # student dashboard, 4 tabs
+│   │   └── StudentProfile.jsx    # admin drill-down of one student
+│   ├── components/
+│   │   ├── Sidebar.jsx           # shared nav sidebar
+│   │   ├── KpiCard.jsx           # KPI stat card
+│   │   ├── StudentModal.jsx      # add/edit student form modal
+│   │   ├── StudentListGrid.jsx   # searchable/filterable student card grid
+│   │   └── JobCard.jsx           # career match card
+│   ├── utils/auth.js             # localStorage session helpers
+│   └── __tests__/Login.test.jsx  # Vitest frontend test
+├── backend/                      # BACKEND Express API (own package.json)
+│   ├── server.js                 # app bootstrap, Swagger, Mongo connect
+│   ├── auth.js                   # /api/auth routes (login, users)
+│   ├── auth.model.js             # bcrypt compare + JWT signing
+│   ├── items.js                  # /api student/data/predict routes (JWT-protected)
+│   ├── item.model.js             # business logic: normalize, AI call, insight
+│   ├── middleware/authMiddleware.js  # verifyToken JWT guard
+│   ├── models/Student.js         # Mongoose student schema
+│   ├── models/User.js            # Mongoose user schema
+│   ├── seed.js                   # DB seeder (upsert from JSON)
+│   ├── .env / .env.example       # PORT, MONGO_URI, JWT_SECRET
+│   ├── Containerfile.backend     # node:20-alpine image
+│   ├── babel.config.json         # for Jest ESM transforms
+│   ├── __tests__/                # Jest + Supertest tests (auth, items)
+│   └── db/                       # data files + Python ETL scripts
+│       ├── Ekspot_Senat.mdb      # source MS Access database
+│       ├── sedut_mdb_tulen.py    # main offline extractor → JSON
+│       ├── extract_history.py    # patch academicHistory into JSON
+│       ├── ekstrak_mdb.py        # pyodbc extractor (Windows-oriented, legacy)
+│       ├── prepare_ml_data.py    # build ML training CSV
+│       ├── data_tvet_muktamad.json  # final student records (currently "[]")
+│       ├── data_tvet.json        # older 553-record dummy dataset
+│       ├── login_users.json      # legacy plaintext users (unused)
+│       └── *.csv                 # intermediate table dumps + training CSV
+├── ML/                           # PYTHON ML microservice
+│   ├── ml.py                     # FastAPI app (predict + ETL)
+│   ├── train_and_evaluate.py     # RandomForest training + GridSearchCV
+│   ├── test_ml.py                # pytest API tests
+│   ├── requirements.txt
+│   ├── Containerfile             # python:3.9-slim + mdbtools
+│   └── *.pkl                     # trained models (v3 active)
+├── public/                       # static assets (logo-tvetmara.jpg, vite.svg)
+├── mongodb_data/                 # Mongo volume (gitignored)
+├── compose.yml                   # 4-service orchestration
+├── Containerfile.frontend        # 2-stage: node build → nginx serve
+├── nginx.conf                    # SPA fallback + proxy + 100MB upload
+├── inspect_mdb_linux.py          # standalone MDB schema dump utility
+├── package.json / vite.config.js / tailwind.config.js / postcss.config.js
+├── eslint.config.js
+├── index.html                    # loads Phosphor Icons CDN
+└── .github/workflows/ci.yml      # CI: test all 3 services → build images
+```
+
+Note: `README.md` and `AGENTS.md` exist in git history (committed) but are currently deleted in the working tree.
+
+---
+
+## 4. Frontend — React SPA (root package)
+
+**Dependencies (root `package.json`):** react 19, react-dom 19, react-router-dom 7, chart.js 4 + react-chartjs-2. Dev: vite 7, tailwind 3 + postcss + autoprefixer, vitest 4 + Testing Library, eslint 9. Scripts: `dev`, `build`, `lint`, `preview`, `test` (vitest run).
+
+### 4.1 Routing & Auth Guard — `src/App.jsx`
+
+- `BrowserRouter` with 4 routes:
+  - `/` → Login page. If already logged in (user in localStorage), redirect to role's dashboard.
+  - `/staff-dashboard` → **admin only** (StaffDashboard).
+  - `/student-dashboard` → **user (student) only** (StudentDashboard).
+  - `/student-profile?id=X` → **admin only** (StudentProfile drill-down).
+- `ProtectedRoute` wrapper: reads `getStoredUser()`; no user → `/`; wrong role → own dashboard.
+- App subscribes to custom window event `authChange` (fired by auth utils on login/logout) so it re-renders on session change.
+
+### 4.2 Session Utils — `src/utils/auth.js`
+
+- localStorage keys: `ikmbCurrentUser` (user object: email/role/displayName/studentId), `ikmbToken` (JWT).
+- `storeUser()` / `clearStoredUser()` dispatch `authChange` event.
+- `getDashboardPathForRole(role)`: `admin` → `/staff-dashboard`, anything else → `/student-dashboard`.
+
+### 4.3 Pages
+
+**`Login.jsx`** — split-screen (blue AI-themed hero left with Unsplash image, form right). Pre-filled demo credentials `admin@ikmb.edu.my` / `password123`. On submit: POST `/api/auth/login` → stores user + token → navigates by role. Shows inline error on failure. Helper text explains default accounts (`admin@ikmb.edu.my`, `user@ikmb.edu.my`, students `ikm001@student.ikmb.edu.my` format, all passwords `password123`).
+
+**`StaffDashboard.jsx`** (admin) — 6 sidebar tabs:
+1. **Dashboard Overview** — 3 KPI cards (total active students, average employability %, high-risk count), bar chart of institute-average PLO 1–9 vs 80% target, top-5 high-risk list (red cards, reason shown: low attendance or low CGPA), top-5 performers list (yellow cards with a score using a *different* formula: `(cgpa/4)*60 + attendance*0.4`). Clicking a student → `/student-profile?id=X`.
+2. **AI Prediction** — manual input form (CGPA, attendance, 9 PLO scores, certification dropdown) → POST `/api/predict/manual` → colored result badge (Rendah=green / Sederhana=yellow / Tinggi=red).
+3. **Skills Gap Analysis** — table of per-PLO institute average, gap to 80% target, status badge: `Selamat` (≥80), `Perlu Peningkatan` (60–79), `Kritikal` (<60).
+4. **Learning Pathways** — cards mapping weakest PLOs to intervention courses (hardcoded `pathwayMappings`, e.g. PLO 1 → "Kursus Komunikasi Efektif"), sorted by gap size descending.
+5. **Student Management** — `StudentListGrid` (search box + course filter chips Semua/ITW/DFK/DGA/SLR/DCG/SED/PPU + card grid) + `StudentModal` for add (POST `/api/students`) and edit (PUT). Page reloads after save (`window.location.reload()`). Note: `handleDelete` still exists in this file but the management tab UI does not expose a delete button anymore (grid cards only navigate to profile).
+6. **Pengurusan Data** — click `.mdb` file picker → POST multipart to `/api/data/upload-mdb` → backend relays to ML ETL → MongoDB refreshed → success message → page auto-reloads after 2s.
+
+Employability formula (client-side heuristic, repeated in several places): `min(100, round((cgpa/4)*40 + attendance*0.6))`. High-risk definition (client): `dropoutRisk==="Tinggi"` OR attendance<80 OR cgpa<2.0.
+
+**`StudentDashboard.jsx`** (student) — 4 tabs. If logged-in user has `role=user` + `studentId`, list is filtered to only that student (`isRestrictedUser`).
+1. **Profil & Prestasi** — greeting with displayName, risk badge (Tinggi red / Sederhana yellow / else green "Good Standing"), 3 stat cards (employability %, attendance %, latest CGPA), **radar chart** of own 9 PLO scores vs 80% target (data from `/students/:id/skill-gap` which includes live AI prediction), yellow "CADANGAN AI" insight box, dark card with top-2 career previews per course.
+2. **Kemaskini Sijil Saya** — upload profile image (POST `students/:id/profile-image`), add certificate: name + issuer + file PDF/PNG/JPG ≤5MB (POST `students/:id/certificates`), grid list of own certificates with delete (DELETE `students/:id/certificates/:certId`). Certificates open in new tab via `/uploads/...` URL.
+3. **Padanan Kerjaya (AI)** — `JobCard` grid from hardcoded `careerMapping` keyed by course code (ITW/DFK/DGA/SLR/DCG/SED/PPU), 2 jobs each (e.g. DFK → Cloud Engineer @ AWS Malaysia 94%, DevOps Engineer @ Maxis 85%).
+4. **Kursus Cadangan** — recommended course card based on weakest PLO from insight (hardcoded `courseMappings` per PLO), plus static "AWS Cloud Practitioner Essentials" promo card.
+
+**`StudentProfile.jsx`** (admin drill-down) — query param `?id=` (defaults to `TVET001` if absent). Fetches `/students/:id/skill-gap`. Layout:
+- **Left card (sticky):** dark blue banner, StatusBadge (risk), avatar initial, name, ID, course full name, semester, certification, attendance. Buttons: Edit (no-op), Print (`window.print()`), Download (exports profile+history+insight+PLO scores as JSON file).
+- **Right panel, 3 tabs:**
+  - *Maklumat Peribadi* — email derived as `{id}@student.ikmb.edu.my`, phone (`noTelefon`), IC number (`noKP`), address (`alamat`).
+  - *Rekod Akademik* — CGPA value + colored progress bar (green ≥3.5, amber ≥2.5, else red), dual-axis chart: GPA line (left axis, max 4) + attendance bars (right axis, max 100) per semester from `academicHistory`.
+  - *PLO & AI Insight* — dark AI card with employability % + insight message, PLO radar chart with "DATA PLO BELUM LENGKAP" orange warning if any PLO=0, and 3 static intervention cards (Kaunseling Kehadiran, Klinik Akademik, Pembangunan Soft Skills) with alert() buttons.
+
+### 4.4 Components
+
+- `Sidebar.jsx` — logo, "Menu Utama" nav items (Phosphor icons), user chip at bottom (initials avatar, displayName, role label `Penyelaras`/`Pelajar`), logout button. Fixed drawer on mobile with overlay, static on md+.
+- `KpiCard.jsx` — title, big value (or "-" while loading), icon with colored bg, optional subtitle, animated progress bar (barWidth %).
+- `StudentModal.jsx` — add/edit form: ID (disabled when editing), Nama, CGPA, Kehadiran, Sijil dropdown (Tiada/CompTIA/Cisco CCNA/AWS Cloud), Kursus dropdown (**6 codes — SED missing**), Status dropdown (Bermasalah/Sederhana/Cemerlang).
+- `StudentListGrid.jsx` — own search + filter-chip state (`useMemo` filtering by name/ID + course), responsive 1–4 column card grid; card: dark banner + Sem badge, centered avatar initial, name, course full name, ID + CGPA footer. Empty state "Tiada pelajar dijumpai".
+- `JobCard.jsx` — icon, green match % badge, job title, company, "Mohon Sekarang" button (static).
+
+### 4.5 Frontend Config Files
+
+- `vite.config.js` — react plugin; dev server proxy `/api` → `http://localhost:$PORT` (PORT from env, default 5000); `allowedHosts: ['dashboard-bak.tvetdfk.com']`; Vitest config: jsdom environment, globals, only `src/**/*.test.{js,jsx}` included.
+- `tailwind.config.js` — content: `index.html` + `src/**`; font family "Plus Jakarta Sans".
+- `postcss.config.js` — tailwind + autoprefixer.
+- `index.html` — title "TVETMARA AI Dashboard", loads Phosphor Icons from unpkg CDN, mounts `#root` → `src/main.jsx`.
+- `nginx.conf` (production) — `client_max_body_size 100M` (for .mdb uploads, set both at server and `/api/` location level); `/` → SPA fallback `index.html`; `/api/` and `/uploads/` → `proxy_pass http://backend:5000`.
+- `src/index.css` — Google Fonts import + 3 Tailwind directives. `src/App.css` — leftover Vite template, unused.
+
+---
+
+## 5. Backend — Express API (`backend/` package)
+
+**Dependencies:** express 5, mongoose 9, jsonwebtoken 9, bcryptjs 3, multer 2, cors, dotenv, swagger-jsdoc + swagger-ui-express. Dev: jest 30 + supertest + babel preset-env + cross-env + nodemon. Scripts: `start`, `dev` (nodemon), `seed`, `start:prod` (= `node server.js`, **no seeding**), `test` (cross-env NODE_ENV=test jest --forceExit).
+
+### 5.1 Bootstrap — `server.js`
+
+- `cors()` + `express.json()`.
+- Static route `/uploads` → serves files from `backend/uploads/` (certificate & profile images).
+- Swagger UI at `/api/docs` (openapi 3.0, bearerAuth scheme, scans `./auth.js` + `./items.js` JSDoc comments).
+- Mongoose connects `process.env.MONGO_URI` (skipped when `NODE_ENV=test`).
+- `GET /api/health` → `{status:"ok", source:"mongodb-database"}`.
+- Mounts `authRouter` at `/api/auth`, `itemsRouter` at `/api`. Listens `PORT` (default 5000), skipped under test.
+- Exports `app` for supertest.
+
+### 5.2 Auth — `auth.js` + `auth.model.js` + `middleware/authMiddleware.js`
+
+- `POST /api/auth/login` — validates email+password present → `authenticateUser()`:
+  - loads all users from MongoDB `User` collection, finds by lowercase email;
+  - `bcrypt.compare(password, hashed)`;
+  - on match signs **JWT (8h expiry)** with `process.env.JWT_SECRET`, payload `{email, role, studentId}`;
+  - returns `{message, user: sanitized (no password), token}`. Wrong credentials → 401, missing fields → 400.
+- `GET /api/auth/users` — **public (unprotected)** sanitized user list.
+- `verifyToken` middleware — expects `Authorization: Bearer <jwt>`; missing header → 403, invalid/expired → 401; attaches decoded payload to `req.user` (used for role + studentId checks).
+
+### 5.3 Student/Data/Predict Routes — `items.js` (all behind `verifyToken`)
+
+| Endpoint | Role check | What it does |
 |---|---|---|
-| React.js | 19.x | User Interface framework |
-| React Router DOM | 7.x | Client-side routing and navigation |
-| Vite | 7.x | Build tool and development server |
-| Tailwind CSS | 3.x | Utility-first CSS styling |
-| PostCSS + Autoprefixer | — | CSS processing and vendor prefixing |
-| Chart.js | 4.x + react-chartjs-2 | Data visualization (Bar, Radar charts) |
-| Phosphor Icons | — | Icon library (loaded via CDN in `index.html`) |
-| Vitest + Testing Library | 4.x | Frontend testing |
+| `GET /students` | any authenticated | list all students (normalized via `normaliseStudent`) |
+| `POST /students` | admin only | create student |
+| `PUT /students/:studentId` | admin only | update student |
+| `DELETE /students/:studentId` | admin only | delete student |
+| `GET /students/:studentId` | any | single student normalized |
+| `GET /students/:studentId/skill-gap` | any | student + live AI risk + PLO chart arrays + insight message |
+| `POST /students/:studentId/certificates` | admin **or** owner (`req.user.studentId === studentId`) | Multer disk upload to `uploads/certificates/` (≤5MB, jpeg/jpg/png/pdf only), `$push` into `uploadedCertificates`. Unauthorized + file present → file unlinked first. |
+| `DELETE /students/:studentId/certificates/:certId` | admin or owner | removes subdocument + unlinks physical file |
+| `POST /students/:studentId/profile-image` | admin or owner | same uploader; sets `profileImage` field to `/uploads/certificates/<file>` |
+| `POST /predict/manual` | admin only | body = 13 features → `getRealAIPrediction()` → `{success, prediction}` (Rendah/Sederhana/Tinggi) |
+| `POST /data/upload-mdb` | admin only | Multer **memory** storage ≤100MB, `.mdb` only → forwards file to ML service `/etl/process-mdb` via FormData fetch → receives student array → **sync step**: `Student.deleteMany` for IDs absent in new file → **bulkWrite upserts** both Students and Users (one hashed default password reused, email `<ID>@student.ikmb.edu.my`, password `password123`). Two bulk network calls total (OOM fix). |
 
-### Backend
-| Technology | Version | Purpose |
-|---|---|---|
-| Express.js | 5.x | REST API server framework |
-| Node.js | — | JavaScript runtime |
-| MongoDB | — | Database |
-| Mongoose | 9.x | MongoDB ODM (Object Document Mapper) |
-| JWT (jsonwebtoken) | 9.x | User authentication via tokens |
-| bcryptjs | 3.x | Password hashing |
-| cors | 2.x | Cross-Origin Resource Sharing |
-| Swagger UI | — | Interactive API documentation |
-| Jest + Supertest | — | Backend API testing |
+### 5.4 Business Logic — `item.model.js`
 
-### ML Service
-| Technology | Version | Purpose |
-|---|---|---|
-| FastAPI | — | Python REST API framework |
-| Uvicorn | — | ASGI web server |
-| scikit-learn | — | Machine learning library (RandomForestClassifier) |
-| joblib | — | Model serialization and loading |
-| Pydantic | — | Data validation |
-| pandas | — | Data manipulation |
-| numpy | — | Numerical computing |
-| pytest | — | ML service testing |
+- `certificationScores` map: Tiada 35, CompTIA 70, Cisco CCNA 85, AWS Cloud 90 (default 50).
+- `normaliseStudent(record)` — converts Mongo doc (Malay field names) → API object: `id, nama, kursus, semester, attendance, cgpa, anugerah, kokoLulus, plo1..plo9 (Number), certification, certificationScore, dropoutRisk, careerStatus:"Pelajar", uploadedCertificates, profileImage, academicHistory (numeric), noKP, noTelefon, alamat`.
+  - Risk mapping: `Bermasalah→Tinggi`, `Sederhana→Sederhana`, `Cemerlang→Rendah`, `Pending AI→Pending`.
+  - **Overrides**: attendance<80 or cgpa<2.0 → forced `Tinggi`; cgpa≥3.5 → `Rendah`; else Status_Pelajar=Cemerlang → `Rendah`.
+- `getRealAIPrediction(features)` — POSTs to `process.env.ML_API_URL || 'http://127.0.0.1:8000'` + `/predict/risk` with JSON body `{CGPA, Attendance, PLO_1..PLO_9, Sijil}`. Maps Malay prediction → risk word. **Heuristic fallback** if ML unreachable: attendance<80 or cgpa<2.0 → Tinggi; cgpa≥3.5 → Rendah; else Sederhana.
+- `buildMetrics(student)` — 9 objects `{label:"PLO n", value, target:80}`.
+- `buildInsight(metrics, student)` — finds weakest PLO; if value 0 → "not yet recorded" note; else Malay message naming weakest skill + value% + risk + priority text ("perlu diberi perhatian segera" if gap ≥20, else "bole dipertingkatkan lagi" — sic, typo in source).
+- `getStudentSkillGapById(id)` — combines: normalized student + **live AI risk overwrite** (`student.dropoutRisk = trueAiRisk`) + `chart:{labels,current,target}` + `insight`.
+- CRUD: `createStudent`, `updateStudent` (findOneAndUpdate by ID_Pelajar, validators), `deleteStudent`.
 
-### DevOps / Deployment
-| Technology | Purpose |
+### 5.5 Mongoose Models
+
+**`Student.js`** — all loose strings (numbers stored as strings, parsed at read time):
+`ID_Pelajar, Nama, Kursus, Semester(Number), Kehadiran_Pct, CGPA, Sijil_Profesional, PLO_1..PLO_9, Status_Pelajar, No_KP, No_Telefon, Alamat` (last 3 with default ''), `academicHistory[] {semester:Number, gpa:String, cgpa:String, attendance:String}`, `uploadedCertificates[] {name, issuer, fileName, filePath, uploadDate:Date.now}`, `profileImage`.
+
+**`User.js`** — `email` (required unique), `password` (bcrypt hash), `role` enum `admin|user` (default user), `displayName`, `studentId` (default null).
+
+### 5.6 Seeding — `seed.js`
+
+- Reads `backend/db/data_tvet_muktamad.json`.
+- **Non-destructive upsert**: for each student, `findOneAndUpdate` with `$set` (upsert) — preserves uploadedCertificates/profileImage of existing docs; also upserts matching User account (default bcrypt password `password123`).
+- Ensures `admin@ikmb.edu.my` (role admin) + `user@ikmb.edu.my` (role user) accounts exist.
+- Run manually with `npm run seed`. Note: compose `start:prod` just runs `node server.js` — the compose comment about "automatic seed on startup" is stale.
+
+### 5.7 Environment
+
+`backend/.env.example`: `PORT=5001`, `MONGO_URI=mongodb://127.0.0.1:27017/ikmb-dashboard`, `JWT_SECRET=your_secret_key_herea`. Real `.env` gitignored. Also consumed: `ML_API_URL` (set to `http://ml-api:8000` inside compose).
+
+---
+
+## 6. ML Service — Python FastAPI (`ML/`)
+
+### 6.1 API — `ml.py` (title "TVETMARA AI Prediction API V3")
+
+- Startup: `joblib.load("model_ai_risiko_lengkap_v3.pkl")` → global `risk_model` (RandomForestClassifier).
+- `GET /` — health: `{"status": "AI Server V3 is running"}`.
+- `POST /predict/risk` — Pydantic body `StudentFeatures`: `CGPA, Attendance, PLO_1..PLO_9 (floats), Sijil (str)`.
+  - Feature engineering: `PLO_Avg` = mean of 9 PLOs, `PLO_Variance` = variance.
+  - Builds DataFrame with exact training column names (`CGPA`, `Avg_Subjek_Attendance` ← Attendance, PLO_1..9, PLO_Avg, PLO_Variance).
+  - Reorders columns to `risk_model.feature_names_in_` if available.
+  - Returns `{success, prediction, raw_output}` where prediction ∈ {Cemerlang, Sederhana, Bermasalah}. 500 if model not loaded; 400 on predict error.
+- `POST /etl/process-mdb` — accepts `.mdb` UploadFile (400 otherwise), saves to temp file, runs full ETL with **system mdbtools** (`mdb-export`, `mdb-tables` via subprocess), deletes temp file, returns `{success, data: [student records]}`.
+
+### 6.2 ETL Pipeline inside `ml.py` (`process_mdb_data`)
+
+1. `inspect_mdb()` — debug dump of every table's columns + first row.
+2. **GPA table** → per student: latest semester + latest CGPA; also builds `history_map` of `{semester, gpa, cgpa}` per semester.
+3. **Pelajar table** → name, course code (`Kod_Kursus_Pelajar`), IC (`NoKP_Pelajar`), phone, merged address (Alamat + Poskod + Bandar).
+4. **Daftar_Subjek** → overall average attendance (`Kehadiran` mean) **and per-semester averages** (only values >0), matched into each `academicHistory` entry by semester.
+5. **Detail_Result** → PLO scores: regex `LO(\d+)` on `Kod_Ujian`, Markah averaged per PLO 1–9.
+6. **Anugerah** → award flag True. 7. **Pelajar_Koko_Detail** (Result == 'LULUS') → `Koko_Lulus` flag.
+7. Finalize: average PLO lists → strings (0 if none), sort history by semester, strip temp fields. Returns list of dicts matching Student schema (`Status_Pelajar: 'Pending AI'`, `Sijil_Profesional: 'Tiada'`).
+
+### 6.3 Training — `train_and_evaluate.py`
+
+- Input: `../backend/db/ml_training_data_real.csv` (733 data rows + header).
+- Preprocessing: CGPA to numeric (median fill), PLOs numeric (0 fill); engineers `PLO_Avg`, `PLO_Variance`.
+- Features: `CGPA, Avg_Subjek_Attendance, PLO_1..9, PLO_Avg, PLO_Variance`. Target: `Status_Pelajar`.
+- 80/20 stratified split (random_state 42) → `GridSearchCV` over `n_estimators [100,200,300]`, `max_depth [None,10,20]`, `min_samples_split [2,5,10]`, `class_weight ['balanced',None]`, cv=5, scoring `f1_weighted` on `RandomForestClassifier`.
+- Prints best params, accuracy, classification report, confusion matrix; saves `model_ai_risiko_lengkap_v3.pkl`.
+- Model files: **v3 active** (~714 KB); v2 and `model_ai_tvet_besut.pkl` kept as history.
+
+### 6.4 Tests — `test_ml.py` (pytest + TestClient)
+
+Health check; valid payload → prediction in 3 labels; missing PLO fields → HTTP 422.
+
+`requirements.txt`: fastapi, uvicorn, scikit-learn, joblib, pydantic, pandas, numpy, httpx, pytest, pytest-asyncio, python-multipart.
+
+---
+
+## 7. Data Layer & Offline Pipeline (`backend/db/`)
+
+**Source:** `Ekspot_Senat.mdb` — Microsoft Access export of the senate system. Key tables: `GPA`, `Pelajar`, `Daftar_Subjek`, `Detail_Result`, `Anugerah`, `Pelajar_Koko_Detail`, `Layak_Sijil`, `Tidak_Lengkap`.
+
+| File | Purpose |
 |---|---|
-| Docker Compose | Multi-container orchestration |
-| Nginx | Reverse proxy and static file serving |
-| GitHub Actions | CI/CD automation |
-| Containerfile (Dockerfile) | Frontend + ML service Docker images |
+| `sedut_mdb_tulen.py` | Main **offline** extractor (mdbtools): merges all tables per student incl. per-semester `academicHistory` (GPA + attendance) → writes `data_tvet_muktamad.json`. (Note: hardcoded `DB_PATH` points to old `db/` root location — needs path fix to run.) |
+| `extract_history.py` | Pandas patcher: rebuilds `academicHistory` (CGPA + attendance per semester, filters 0-attendance, assumes 100 if missing) into existing JSON. |
+| `ekstrak_mdb.py` | Windows-oriented pyodbc extractor (first table → JSON). Legacy. |
+| `prepare_ml_data.py` | Builds ML training set: extracts 5 tables, pivots PLO scores, aggregates subject stats (credits, fails, drops, koko), merges with latest CGPA + award flag, generates ground-truth labels with rule-based scoring + Gaussian noise → `ml_training_data_real.csv` (733 rows). Label logic: Cemerlang if CGPA≥3.75 & attendance≥80 & all active PLOs≥80; else score<70 → Bermasalah, else Sederhana. |
+| `ml_training_data_real.csv` | Final training CSV consumed by `train_and_evaluate.py`. |
+| `data_tvet_muktamad.json` | Final student JSON for seeding. Currently just `[]` (2 bytes) locally. |
+| `data_tvet.json` | Older 553-record dummy dataset (IDs TVET001...; no Nama field). |
+| `login_users.json` | Legacy plaintext user list. **Superseded by Mongo Users. Contains plaintext passwords — sensitive artifact.** |
+| `*.csv` | Raw table dumps (GPA ~2,284 rows; Daftar_Subjek ~16,184; Detail_Result ~64,785; pelajar ~1,327; Anugerah ~358; Layak_Sijil ~123). |
+| `inspect_mdb_linux.py` (repo root) | Standalone utility: prints all tables + columns + 3 sample rows via mdbtools. Path also points to old root `db/` folder. |
+
+**Runtime (online) path** doesn't use these scripts — the same ETL logic lives inside `ML/ml.py` and runs when admin uploads `.mdb` through the UI.
 
 ---
 
-## 3. Project Architecture
+## 8. DevOps & CI/CD
 
-The system is split into three independent services that communicate over HTTP:
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                     NGINX (Port 80)                       │
-│  - Serves React static files                              │
-│  - Proxies /api/* to Backend                              │
-└────────────────────┬─────────────────────────────────────┘
-                     │
-        ─────────────┼─────────────
-        │            │            │
-   ┌────▼────┐  ┌──▼───┐  ┌────▼────┐
-   │Frontend │  │Backend│  │ ML API  │
-   │React    │  │Express│  │ FastAPI │
-   │(Vite)   │  │MongoDB│  │(Python) │
-   │Port 80  │  │Port5k │  │Port 8000│
-   └─────────┘  └──▲───┘  └─────────┘
-                  │
-           ┌──────▼──────────┐
-           │   MongoDB       │
-           │   (Database)    │
-           └─────────────────┘
-```
+- **`compose.yml`** — 4 services on `tvet_net` bridge. Backend: env from `backend/.env`, overridden `MONGO_URI=mongodb://mongodb:27017/ikmb-dashboard`, `ML_API_URL=http://ml-api:8000`; command `sleep 5 && npm run start:prod` (just starts server — seeding must be done via MDB upload in UI or manual `npm run seed`). Mongo volume `./mongodb_data:/data/db:Z`. All `restart: always`.
+- **`Containerfile.frontend`** — stage 1: node:20-alpine `npm install && npm run build`; stage 2: nginx:alpine + custom `nginx.conf` + `dist/`.
+- **`backend/Containerfile.backend`** — node:20-alpine, production install, EXPOSE 5000, `node server.js`.
+- **`ML/Containerfile`** — python:3.9-slim, `apt-get install mdbtools`, pip install, uvicorn on 8000.
+- **`.dockerignore`** — excludes node_modules, dist, ML, .git, .env, tar files, 2 db python scripts.
+- **CI `.github/workflows/ci.yml`** ("TVETMARA CI/CD Pipeline") on push/PR to main/master: 3 parallel jobs — frontend (`npm install`, `npm test`, `npm run build`), backend (jest), ml-service (pytest) — then `docker-build` job (needs all 3) builds 3 images: `tvet-frontend`, `tvet-backend`, `tvet-ml-api`.
 
 ---
 
-## 4. Frontend Application (`src/`)
+## 9. Testing
 
-### 4.1 Entry Point
-- **`src/main.jsx`**: Bootstraps the React application using `StrictMode`, mounts it to the DOM element with `id="root"`, and imports the global CSS.
-- **`src/App.jsx`**: The main application component that sets up routing via `BrowserRouter` and `Routes`.
-
-### 4.2 Routing Structure
-
-| Path | Component | Access |
-|---|---|---|
-| `/` | `Login` | Public (redirects to dashboard if already logged in) |
-| `/staff-dashboard` | `StaffDashboard` | Admin only (`role: admin`) |
-| `/student-dashboard` | `StudentDashboard` | Student only (`role: user`) |
-| `/student-profile` | `StudentProfile` | Admin only (`role: admin`) |
-
-A **`ProtectedRoute`** wrapper is used to enforce role-based access control. It reads the stored user from `localStorage` and either redirects to the appropriate dashboard or denies access.
-
-### 4.3 Authentication Utility (`src/utils/auth.js`)
-
-| Function | Purpose |
-|---|---|
-| `getStoredUser()` | Reads user data from `localStorage` key `ikmbCurrentUser` |
-| `storeUser(user)` | Saves user object to `localStorage` |
-| `clearStoredUser()` | Removes user data and token from `localStorage` on logout |
-| `getToken()` | Returns the JWT token stored at `ikmbToken` |
-| `getDashboardPathForRole(role)` | Maps `admin` → `/staff-dashboard`, `user` → `/student-dashboard` |
-
-### 4.4 Pages
-
-#### 4.4.1 Login Page (`src/pages/Login.jsx` — 135 lines)
-- **Purpose**: Entry point for all users. Renders a split-screen design with an AI-themed banner on the left (desktop) and a login form on the right.
-- **Features**:
-  - Pre-filled demo accounts are shown in a hint paragraph for easy testing
-  - Form fields: email (type `email`) and password (type `password`)
-  - On submission, sends a POST request to `/api/auth/login`
-  - On success: stores user data and JWT token in `localStorage`, then navigates to the appropriate dashboard using `getDashboardPathForRole()`
-  - On failure: displays an error message in a red alert box
-  - Uses Phosphor icons for envelope, lock, and brain imagery
-
-#### 4.4.2 Staff Dashboard (`src/pages/StaffDashboard.jsx` — 309 lines)
-- **Purpose**: Administrative dashboard for staff/penyelaras. Contains five major sub-sections accessed via a side navigation tab system.
-
-**Tabs:**
-
-1. **Overview Dashboard** (`activeTab: "overview"`)
-   - Three KPI Cards: Total Active Students, Average Employability Score (%), High-Risk Student Count
-   - Bar Chart: Average PLO scores vs Institutional Target (80%) across all 9 PLOs — rendered using Chart.js `react-chartjs-2`
-   - Two side-by-side panels:
-     - **High-Risk Students** (red zone): Lists up to 5 students with low attendance (<80%) or low CGPA (<2.0). Each is clickable to view their profile.
-     - **Top Performers** (yellow zone): Lists the top 5 students by CGPA, showing their employability percentage and award status.
-   - Both lists navigate to `/student-profile?id={studentId}` when clicked.
-
-2. **AI Manual Prediction** (`activeTab: "prediction"`)
-   - A form allowing staff to manually input student features (CGPA, attendance %, certification type, all 9 PLO scores)
-   - "Jana Ramalan AI" button sends these features to `/api/predict/manual`
-   - The ML service returns a prediction (Rendah / Sederhana / Tinggi) which is displayed with a color-coded badge
-
-3. **Skills Gap Analysis** (`activeTab: "skills"`)
-   - A table showing each PLO (1-9), the institute average score, the gap vs target (80%), and a status badge:
-     - **Selamat** (≥80%)
-     - **Perlu Peningkatan** (60-79%)
-     - **Kritikal** (<60%)
-
-4. **Learning Pathways** (`activeTab: "pathways"`)
-   - Displays recommended course/workshop cards based on the PLO skills with the largest gaps
-   - Each card shows the PLO name, the gap percentage, and the mapped real-world workshop/training path (e.g., PLO 1 → "Kursus Komunikasi Efektif")
-   - Mappings are defined in a `pathwayMappings` object within the component
-
-5. **Student Management** (`activeTab: "management"`)
-   - A searchable, sortable table of all students with columns: ID, CGPA, Attendance, Dropout Risk status, Actions
-   - **Add Student**: Opens a modal (`StudentModal`) to create a new student record (ID_Pelajar, Nama, CGPA, Kehadiran, Sijil, Kursus, Status)
-   - **Edit Student**: Pre-fills the modal with existing data and updates via PUT `/api/students/:studentId`
-   - **Delete Student**: Sends DELETE `/api/students/:studentId` with a browser confirm dialog
-   - CRUD operations require JWT token in the `Authorization: Bearer <token>` header
-
-#### 4.4.3 Student Dashboard (`src/pages/StudentDashboard.jsx` — 252 lines)
-- **Purpose**: Personalized dashboard for logged-in students. Restricted to show only the logged-in student's own data via a security filter.
-- **Tabs:**
-
-1. **Profil & Prestasi** (`activeTab: "dashboard"`)
-   - Welcome header with student display name (from `localStorage`)
-   - Risk status badge (green/yellow/red) based on `dropoutRisk`
-   - Three stat cards: Employability Score (%), Average Attendance (%), Current CGPA
-   - **Radar Chart**: Visualizes the student's 9 PLO scores against the 80% target using `Radar` from react-chartjs-2
-   - An AI insight text box that describes the weakest skill and recommended action
-   - Career opportunity preview panel (dark-themed card) showing the top 2 job matches for the student's course, with AI match percentage
-
-2. **Padanan Kerjaya (AI)** (`activeTab: "career"`)
-   - Displays job recommendation cards based on the student's enrolled course (`kursus` field)
-   - Hardcoded `careerMapping` dictionary maps 7 course codes (ITW, DFK, DGA, SLR, DCG, SED, PPU) to realistic Malaysian industry job titles
-   - Each `JobCard` shows: job title, company, AI match percentage (%), and a "Mohon Sekarang" button
-
-3. **Kursus Cadangan** (`activeTab: "courses"`)**
-   - Shows personalized course recommendations based on the student's weakest PLO
-   - A main "Recommended by AI" course card is dynamically selected based on `weakestPlo`
-   - A secondary static card for "AWS Cloud Practitioner Essentials" is always shown
-
-#### 4.4.4 Student Profile Page (`src/pages/StudentProfile.jsx` — 289 lines)
-- **Purpose**: Detailed profile view for a single student, accessible via `/student-profile?id={studentId}`
-- **Features**:
-  - Navigation back button to return to the staff dashboard
-  - Large avatar circle (colored by risk level: green/yellow/red)
-  - Student details: Name, student ID, course, semester, certification, attendance
-  - Badges for awards (`anugerah`) and apprenticeship completion (`kokoLulus`)
-  - **AI Insight Card**: Shows employability score as a large number with a progress bar and descriptive insight message
-  - **Bar + Line Combo Chart**: Shows semester-by-semester CGPA trend (line) and attendance (bars) from `academicHistory` data
-  - **Radar Chart**: Individual skill gap visualization for the 9 PLOs. Shows a warning if PLO scores are all zero (data incomplete).
-  - **Prescriptive Analytics Section**: Three numbered intervention cards (attendance counseling, academic clinic, soft skills development) with actionable buttons — representing the final layer of analytics (prescriptive/prescribing specific interventions)
-
-### 4.5 Components
-
-#### `src/components/Sidebar.jsx` (48 lines)
-- A fixed left sidebar that appears on all dashboards
-- Displays the TVETMARA logo, navigation buttons, and a user profile card at the bottom with initials, display name, role label (Penyelaras or Pelajar), and a logout button
-- Responsive: collapses off-screen on mobile with a slide-in animation; always visible on desktop (`md:relative md:translate-x-0`)
-- Accepts props for `navItems`, `activeTab`, `setActiveTab`, `isSidebarOpen`, `currentUser`, and `handleLogout`
-
-#### `src/components/KpiCard.jsx` (19 lines)
-- A reusable KPI card with icon, title, value, optional subtitle, and a colored progress bar
-- Parametrized via props: `title`, `value`, `isLoading`, `icon`, `iconBg`, `iconColor`, `barColor`, `barWidth`, `subtitle`
-- Used in StaffDashboard's overview section for the three top KPIs
-
-#### `src/components/StudentModal.jsx` (63 lines)
-- A modal dialog for adding/editing student records
-- Form fields with 2-column grid layout: ID Pelajar, Nama, CGPA, Kehadiran (%), Sijil Profesional, Kursus, Status Pelajar
-- On submit: calls the appropriate API (POST or PUT) with JWT auth
-- The student ID field is disabled when editing (to prevent ID changes)
-- Cancel and Simpan (Save) buttons at the bottom
-
-#### `src/components/JobCard.jsx` (21 lines)
-- A card component displaying a job recommendation
-- Shows: company icon (Phosphor), match percentage badge, job title, company name, and "Mohon Sekarang" button
-- Hover effects lift the card and change icon background to blue
-
-### 4.6 Global Styles (`src/index.css`)
-- Imports the **Plus Jakarta Sans** font from Google Fonts
-- Imports Tailwind CSS directives (`@tailwind base`, `@tailwind components`, `@tailwind utilities`)
-- `tailwind.config.js` configures Plus Jakarta Sans as the default sans-serif font family
-
-### 4.7 Vite Configuration (`vite.config.js`)
-- Uses `@vitejs/plugin-react`
-- Configures a **dev proxy**: the frontend dev server proxies all `/api` requests to the Express backend (default port 5000, configurable via `PORT` env var)
-- Configures Vitest test environment: `jsdom`, `globals: true`, test files pattern `src/**/*.test.{js,jsx}` (strictly frontend only)
-
----
-
-## 5. Backend Application (`backend/`)
-
-### 5.1 Server Entry (`backend/server.js` — 75 lines)
-- Uses `Express.js` as the application framework
-- Middleware: `cors()` (all origins), `express.json()` (body parsing)
-- **Swagger/OpenAPI** documentation available at `/api/docs` using `swagger-jsdoc` and `swagger-ui-express`
-- Swagger definitions are pulled from `auth.js` and `items.js` route files
-- MongoDB connection established at startup (skipped when `NODE_ENV=test`)
-- Health check endpoint: `GET /api/health`
-- Mounts:
-  - `/api/auth` → `authRouter`
-  - `/api` → `itemsRouter`
-- Test environment: does NOT start listening (exported as plain `app` for Supertest)
-
-### 5.2 Authentication Routes (`backend/auth.js` — 76 lines)
-
-| Endpoint | Method | Description | Auth Required |
+| Layer | Framework | File | Covers |
 |---|---|---|---|
-| `/api/auth/users` | GET | Returns all users (sanitized — no passwords) | No |
-| `/api/auth/login` | POST | Authenticates user, returns JWT + user data | No |
+| Frontend | Vitest + Testing Library + jsdom | `src/__tests__/Login.test.jsx` | renders "Selamat Kembali"; failed login shows error message (fetch + navigate mocked) |
+| Backend | Jest + Supertest | `backend/__tests__/auth.test.js` | login success 200 with token (auth.model mocked); wrong password 401 |
+| Backend | Jest + Supertest | `backend/__tests__/items.test.js` | `/api/students` → 403 without token, 401 with invalid token |
+| ML | pytest + TestClient | `ML/test_ml.py` | health, valid prediction label, 422 on missing fields |
 
-**Login Flow:**
-1. Receives `email` and `password` in request body
-2. Calls `authenticateUser(email, password)` from `auth.model.js`
-3. Uses `bcrypt.compare()` to verify the hashed password
-4. On success: issues a JWT token expiring in **8 hours** containing `{ email, role, studentId }`
-5. Returns `{ message, user: { email, role, displayName, studentId }, token }`
-
-### 5.3 Student & Prediction Routes (`backend/items.js` — 250 lines)
-
-All endpoints under `/api` require a valid JWT via the `verifyToken` middleware.
-
-| Endpoint | Method | Description | Allowed Roles |
-|---|---|---|---|
-| `/api/students` | GET | Returns all students | Any authenticated |
-| `/api/students` | POST | Creates new student | Admin only |
-| `/api/students/:studentId` | PUT | Updates student | Admin only |
-| `/api/students/:studentId` | DELETE | Deletes student | Admin only |
-| `/api/students/:studentId` | GET | Returns single student by ID | Any authenticated |
-| `/api/students/:studentId/skill-gap` | GET | Returns skill gap data + AI insight | Any authenticated |
-| `/api/predict/manual` | POST | Runs AI prediction on manual input | Admin only |
-
-### 5.4 Middleware (`backend/middleware/authMiddleware.js` — 20 lines)
-- `verifyToken` middleware extracts the JWT from `Authorization: Bearer <token>` header
-- Verifies token using `process.env.JWT_SECRET`
-- Attaches decoded user info to `req.user` (contains `email`, `role`, `studentId`)
-- Returns 403 if no token, 401 if invalid/expired
-
-### 5.5 Data Models
-
-**User Model** (`backend/models/User.js`):
-```javascript
-{
-  email:       String (required, unique),
-  password:    String (required, bcrypt hashed),
-  role:        String (enum: 'admin' | 'user', default: 'user'),
-  displayName: String,
-  studentId:   String (nullable)
-}
-```
-
-**Student Model** (`backend/models/Student.js`):
-```javascript
-{
-  ID_Pelajar:        String,
-  Nama:              String,
-  Kursus:            String (e.g. ITW, DFK, DGA, SLR, DCG, SED, PPU),
-  Semester:          Number,
-  Kehadiran_Pct:     String (attendance percentage),
-  CGPA:              String,
-  Sijil_Profesional: String (professional certification: Tiada, CompTIA, Cisco CCNA, AWS Cloud),
-  PLO_1 to PLO_9:    String (Program Learning Outcome scores 0-100),
-  Status_Pelajar:    String (Bermasalah / Sederhana / Cemerlang),
-  academicHistory: [ { semester: Number, cgpa: String, attendance: String } ]
-}
-```
-
-### 5.6 Core Business Logic (`backend/item.model.js` — 187 lines)
-
-**`normaliseStudent(record)`** — Transforms raw MongoDB Student documents into a clean frontend-ready format:
-- Computes `dropoutRisk` based on attendance, CGPA, and `Status_Pelajar`:
-  - **Tinggi (High Risk)**: Attendance < 80% OR CGPA < 2.0
-  - **Rendah (Low Risk)**: CGPA ≥ 3.5 OR Status_Pelajar === 'Cemerlang'
-  - **Sederhana (Medium)**: Default
-- Maps `Bermasalah → Tinggi`, `Sederhana → Sederhana`, `Cemerlang → Rendah` as a baseline
-- Assigns a `certificationScore` based on the held certification
-- Preserves `academicHistory` for trend charts on the profile page
-
-**`buildMetrics(student)`** — Creates an array of 9 objects `{ label: 'PLO 1'..'PLO 9', value: number, target: 80 }`
-
-**`buildInsight(metrics, student)`** — Generates an AI insight text:
-- Identifies the weakest PLO skill
-- If any PLO is 0%, warns that data is incomplete
-- Describes how urgently the student needs improvement based on the gap size
-
-**`getRealAIPrediction(features)`** — The bridge to the ML service:
-- Sends a POST request to `http://127.0.0.1:8000/predict/risk` with all student features
-- The ML service's prediction output uses labels `Bermasalah / Sederhana / Cemerlang`, which are mapped to the dashboard's internal labels `Tinggi / Sederhana / Rendah`
-- **Fallback logic**: If the ML service is unreachable, a rule-based prediction is returned:
-  - Attendance < 80% or CGPA < 2.0 → `Tinggi`
-  - CGPA ≥ 3.5 → `Rendah`
-  - Otherwise → `Sederhana`
-
-**`getStudentSkillGapById(studentId)`** — The most important read endpoint:
-1. Fetches the student from MongoDB
-2. Calls `getRealAIPrediction(student)` to get the true AI-predicted risk (overwrites the stored risk)
-3. Builds PLO metrics
-4. Returns `{ student, chart: { labels, current, target }, insight: buildInsight(...) }`
-
-### 5.7 Database Seeding (`backend/seed.js` — 92 lines)
-- Reads the canonical student data from `./db/data_tvet_muktamad.json`
-- **Clears existing data** before seeding (to avoid plain-text password conflicts)
-- Hashes `password123` with bcrypt (salt rounds: 10) — every seeded user gets this password
-- Creates Student records for each student in the JSON
-- Creates User (login) records for each student: email format `{ID_Pelajar}@student.ikmb.edu.my`, role: `user`
-- Adds a default **Admin** account (`admin@ikmb.edu.my`, role: `admin`)
-- Adds a default **Test User** (`user@ikmb.edu.my`, role: `user`)
-
-### 5.8 Environment Variables (`backend/.env.example`)
-```
-PORT=5001
-MONGO_URI=mongodb://127.0.0.1:27017/ikmb-dashboard
-JWT_SECRET=your_secret_key_here
-```
-In Docker Compose, the backend uses `MONGO_URI=mongodb://mongodb:27017/ikmb-dashboard` (Docker internal DNS).
+Run commands:
+- Frontend: `npm test` (root)
+- Backend: `cd backend && npm test` (cross-env NODE_ENV=test jest --forceExit)
+- ML: `cd ML && pytest test_ml.py`
 
 ---
 
-## 6. ML Service (`ML/`)
+## 10. Domain Glossary
 
-### 6.1 API Server (`ML/ml.py` — 74 lines)
-- A FastAPI application titled "TVETMARA AI Prediction API V3"
-- Loads a pre-trained **RandomForestClassifier** model from `model_ai_risiko_lengkap_v3.pkl` using `joblib`
-- Models V1, V2, and V3 are all bundled (V3 is the production model)
-
-**Endpoint:**
-
-| Endpoint | Method | Input | Output |
-|---|---|---|---|
-| `/predict/risk` | POST | `StudentFeatures` (CGPA, Attendance, PLO_1-9, Sijil) | `{ success, prediction, raw_output }` |
-
-**Prediction Pipeline:**
-1. Receives 14 input features via the Pydantic model `StudentFeatures`
-2. Calculates two **engineered features**:
-   - `PLO_Avg`: mean of all 9 PLO values
-   - `PLO_Variance`: variance of all 9 PLO values
-3. Constructs a pandas DataFrame with exactly the feature columns the model was trained on (using `feature_names_in_` for dynamic column ordering)
-4. Maps the API field `Attendance` → the training column name `Avg_Subjek_Attendance` internally
-5. Passes the feature vector to `risk_model.predict()` which returns a string: `"Bermasalah"`, `"Sederhana"`, or `"Cemerlang"`
-6. The backend then maps these labels to the dashboard labels: `Bermasalah → Tinggi`, `Sederhana → Sederhana`, `Cemerlang → Rendah`
-
-**Prediction Labels:**
-| ML Output | Dashboard Label | Meaning |
-|---|---|---|
-| `Cemerlang` | **Rendah** | Low dropout risk — student is thriving |
-| `Sederhana` | **Sederhana** | Medium risk — needs monitoring |
-| `Bermasalah` | **Tinggi** | High risk — needs intervention |
-
-### 6.2 Model Training (`ML/train_and_evaluate.py` — 62 lines)
-- Loads real training data from `../backend/db/ml_training_data_real.csv`
-- Feature engineering: adds `PLO_Avg` and `PLO_Variance`
-- Uses `RandomForestClassifier` with `GridSearchCV` hyperparameter tuning (5-fold cross-validation, F1-weighted scoring)
-- Hyperparameters searched: `n_estimators` [100,200,300], `max_depth` [None, 10, 20], `min_samples_split` [2,5,10], `class_weight` ['balanced', None]
-- Prints classification report, accuracy, and confusion matrix
-- Saves the best model as `model_ai_risiko_lengkap_v3.pkl`
-
-### 6.3 ML Tests (`ML/test_ml.py` — 33 lines)
-- **`test_health_check`**: Ensures the root endpoint returns status `"AI Server V3 is running"` with HTTP 200
-- **`test_predict_risk_valid_data`**: Sends a strong student payload (CGPA 3.9, perfect attendance, 95% in all PLOs) and asserts the prediction is one of the three valid labels
-- **`test_predict_risk_invalid_data`**: Sends an incomplete payload (missing PLO fields) and asserts HTTP 422 (Unprocessable Entity) due to Pydantic validation
-
-### 6.4 ML Requirements (`ML/requirements.txt`)
-```
-fastapi
-uvicorn
-scikit-learn
-joblib
-pydantic
-pandas
-numpy
-```
-
-### 6.5 ML Docker (`ML/Containerfile`)
-- Base image: `python:3.9-slim`
-- Runs `pip install` from `requirements.txt`
-- Copies the entire ML directory (including `.pkl` model files)
-- Exposes port 8000
-- Runs `uvicorn ml:app --host 0.0.0.0 --port 8000`
+- **PLO** — Programme Learning Outcomes: 9 skill scores (0–100%) parsed from assessment codes `LO1..LO9`. Institutional target: **80%** each. Names: 1 Komunikasi Efektif, 2 Pengaturcaraan, 3 Keselamatan Industri (OSH), 4 Pengurusan Projek, 5 Inovasi Produk, 6 Kemahiran Teknikal (Motor/Elektrik), 7 Keusahawanan Digital, 8 Etika & Kepimpinan, 9 Integriti Profesional.
+- **Status labels** (Malay): `Cemerlang` excellent → risk `Rendah` (low); `Sederhana` moderate; `Bermasalah` problematic → risk `Tinggi` (high); `Pending AI` → `Pending`.
+- **Course codes**: ITW Diploma Kompetensi Kimpalan (welding), DFK Diploma Teknologi Komputer / Komputasi Awan (cloud), DGA Diploma Teknologi Automotif, SLR Sijil Lukisan Rekabentuk (mechanical drafting), DCG Diploma Elektrik Industri, SED Sijil Elektrik Domestik, PPU Diploma Penyejukan & Penyamanan Udara (HVAC).
+- **Certifications**: Tiada / CompTIA / Cisco CCNA / AWS Cloud.
+- **Employability score** (heuristic, UI-side): `(CGPA/4)*40 + attendance*0.6`, capped 100.
+- **Default accounts** (all password `password123`): `admin@ikmb.edu.my` (admin), `user@ikmb.edu.my` (user), `<ID>@student.ikmb.edu.my` (each student).
+- **MARA / IKMB / TVET**: MARA = Majlis Amanah Rakyat (Malaysian agency); IKMB = Institut Kemahiran MARA Besut (skills institute in Besut, Terengganu); TVET = Technical & Vocational Education & Training.
 
 ---
 
-## 7. Database Design
+## 11. Key Data Flows (End-to-End)
 
-### 7.1 MongoDB Collections
+**Login**: React form → `POST /api/auth/login` → bcrypt compare vs Mongo User → JWT (8h) → stored in localStorage (`ikmbToken` + `ikmbCurrentUser`) → `authChange` event → redirect by role.
 
-**`users` collection** (stores login credentials):
-- Created by `seed.js` from `data_tvet_muktamad.json`
-- Passwords are always stored bcrypt-hashed (never plain text)
-- Each student gets a user entry at email `{studentId}@student.ikmb.edu.my`
+**Live student risk + skill gap**: `GET /students/:id/skill-gap` → backend normalizes record → calls ML `/predict/risk` with 13 features → ML engineers PLO_Avg/Variance → RandomForest predicts Malay label → mapped to risk word → response `{student, chart{labels,current,target}, insight}` → frontend renders radar + insight box.
 
-**`students` collection** (stores academic data):
-- Each document maps to a TVETMARA student
-- Contains personal info, academic metrics, PLO scores, and academic history
-- Indexed by `ID_Pelajar` (the unique student identifier)
+**Manual prediction (admin)**: form → `POST /predict/manual` → same ML call → colored badge. If ML down → heuristic fallback still returns answer.
 
-### 7.2 Pre-built Seed Data
-- `data_tvet_muktamad.json`: The canonical dataset with real student records (the cleaned/final version of the raw MDB extract). This is the primary source for `seed.js`.
-- `data_tvet.json`: An earlier version of the dataset (kept for historical reference; `.gitignore`d).
+**MDB refresh (admin)**: `.mdb` upload → nginx (100MB limit) → backend Multer memory → FormData forward to ML `/etl/process-mdb` → mdbtools ETL → student array → backend deletes stale students (IDs not in file) → bulkWrite upsert Students + Users (shared hashed `password123`) → frontend reloads. Existing students' uploaded certificates/profile images survive (upsert `$set` only touches listed fields).
+
+**Certificate upload (student)**: multipart (name, issuer, file) → Multer disk storage `backend/uploads/certificates/<timestamp>-<rand>.<ext>` (≤5MB, pdf/jpg/jpeg/png) → `$push` subdocument → file served at `/uploads/...` (proxied by nginx). Delete removes DB entry + physical file.
+
+**Profile image**: same uploader; sets `profileImage` path on student doc.
 
 ---
 
-## 8. Data Pipeline: From MDB to Dashboard
+## 12. Notable Observations / Caveats
 
-The project includes a complete ETL pipeline that transforms raw Microsoft Access (.mdb) files into a structured MongoDB database ready for the ML model:
-
-### Step 1: Extract (`backend/db/ekstrak_mdb.py` / `sedut_mdb_tulen.py`)
-- Uses `mdb-export` (from the `mdbtools` Linux package) to extract tables from the raw `Ekspot_Senat.mdb` file into CSV files:
-  - `pelajar.csv` (student roster)
-  - `Daftar_Subjek.csv` (enrollment/subject records)
-  - `GPA.csv` (grade point history)
-  - `Detail_Result.csv` (exam results with PLO codes)
-  - `Anugerah.csv` (awards)
-
-### Step 2: Prepare ML Data (`backend/db/prepare_ml_data.py` — 122 lines)
-1. Merges all 5 CSV tables using `No_Pelajar` (student ID) as the join key
-2. Calculates aggregate features from `Daftar_Subjek`: total credits, average subject attendance, average marks, failed courses, dropped courses
-3. Calculates `PLO_Avg` and `PLO_Variance` from PLO scores
-4. Determines the latest CGPA per student from the `GPA` table
-5. Generates **realistic ground-truth labels** using a score-based heuristic (combining CGPA, attendance, PLO performance, failures) with added noise to mimic real-world data
-6. Saves the processed dataset to `ml_training_data_real.csv` for model training
-
-### Step 3: Build Academic History (`backend/db/extract_history.py` — 66 lines)
-- Joins `GPA.csv` and `Daftar_Subjek.csv` by `No_Pelajar` and semester
-- Filters out zero-attendance records (subjects not yet attended)
-- For each student, builds a semester-by-semester history of CGPA and attendance
-- Writes this `academicHistory` array back into `data_tvet_muktamad.json` so `seed.js` will import it into MongoDB
-
-### Step 4: Seed to MongoDB (`npm run seed` in backend)
-- `seed.js` reads `data_tvet_muktamad.json` (now with academic history embedded) and populates the `students` and `users` collections in MongoDB
-
-### Step 5: Train ML Model (`ML/train_and_evaluate.py`)
-- Reads `ml_training_data_real.csv`
-- Trains a `RandomForestClassifier` with grid-searched hyperparameters
-- Serializes the best model to `model_ai_risiko_lengkap_v3.pkl`
-
-### Step 6: Serve Predictions (`ML/ml.py`)
-- Loads `model_ai_risiko_lengkap_v3.pkl` at server start
-- Accepts live student feature inputs from the Express backend
-- Returns real-time dropout risk predictions
+- `backend/.env` holds a **real JWT secret** in plaintext locally — gitignored, never commit.
+- `backend/db/login_users.json` contains **plaintext passwords** — legacy artifact, unused by current auth.
+- `backend/db/data_tvet_muktamad.json` is `[]` (empty array) locally — DB populated via MDB upload in UI or by fixing path in `sedut_mdb_tulen.py` (its hardcoded `DB_PATH` points to old root `db/` folder, not `backend/db/`).
+- Student login **passwords reset to `password123` on every MDB sync** (upsert `$set` includes password).
+- `GET /api/auth/users` is **unprotected** — leaks emails/roles/studentIds (no passwords).
+- `StudentModal` course dropdown omits **SED** (exists in data).
+- `src/App.css` is dead Vite template CSS.
+- Employability % shown in UI is a fixed heuristic, independent of AI model output. (StaffDashboard "Top Performers" score uses yet another formula: `(cgpa/4)*60 + attendance*0.4`.)
+- `GET /students` returns full collection to **any** logged-in user; student dashboard filters client-side (data exposure, though UI-restricted).
+- `README.md` / `AGENTS.md` tracked in git but deleted in working tree.
+- `inspect_mdb_linux.py` + `sedut_mdb_tulen.py` paths reference `db/Ekspot_Senat.mdb` at repo root; actual file is `backend/db/Ekspot_Senat.mdb` — adjust before running offline.
+- Compose comment "AUTOMATIC SEED ON STARTUP" is stale — `start:prod` only starts the server; seed with `npm run seed` or upload MDB via UI.
+- Typo in `item.model.js` insight message: "bole dipertingkatkan lagi" (should be "boleh").
+- `handleDelete` in StaffDashboard is dead code — management tab has no delete button.
 
 ---
 
-## 9. CI/CD Pipeline (`.github/workflows/ci.yml`)
-
-The GitHub Actions workflow runs on every push or PR to `main`/`master` and consists of 4 sequential jobs:
-
-### Job 1: Frontend Test & Build
-- Sets up Node.js 20
-- Installs root `package.json` dependencies
-- Runs `npm test` (Vitest)
-- Runs `npm run build` (Vite production build)
-
-### Job 2: Backend Test
-- Sets up Node.js 20
-- Installs `backend/package.json` dependencies
-- Runs `npm test` (Jest + Supertest)
-  - `auth.test.js`: Mocked login success/failure tests
-  - `items.test.js`: Security tests (403 without token, 401 with invalid token)
-
-### Job 3: ML Service Test
-- Sets up Python 3.9
-- Installs ML requirements from `ML/requirements.txt`
-- Runs `pytest test_ml.py` (FastAPI TestClient tests)
-
-### Job 4: Docker Build (depends on all 3 passing)
-- Builds the frontend Docker image from `Containerfile.frontend`
-- Builds the backend Docker image from `backend/Containerfile.backend`
-- Builds the ML Docker image from `ML/Containerfile`
-
----
-
-## 10. Docker Deployment (`compose.yml`)
-
-The project is fully containerized using Docker Compose (v3.8) with **4 services** on a shared `tvet_net` bridge network:
-
-| Service | Container Name | Image | Port | Source |
-|---|---|---|---|---|
-| `mongodb` | `tvet_mongodb` | `mongo:latest` | 27017 | Docker Hub |
-| `backend` | `tvet_backend` | Custom build | 5000 | `./backend/Containerfile.backend` |
-| `ml-api` | `tvet_ml_api` | Custom build | 8000 | `./ML/Containerfile` |
-| `frontend` | `tvet_frontend` | Custom build | 8080 | `./Containerfile.frontend` |
-
-**Networking**:
-- Frontend depends on Backend (`depends_on`)
-- Backend depends on MongoDB (`depends_on`)
-- All services communicate via service name DNS within the `tvet_net` bridge network
-- Nginx inside the frontend container serves the React build and proxies `/api/` → `http://backend:5000/api/`
-- MongoDB data is persisted via a Docker volume from `./mongodb_data:/data/db`
-
-**Environment**:
-- Backend `.env` file pins `PORT` and `JWT_SECRET`
-- `compose.yml` overrides `MONGO_URI` to use the Docker internal URL (`mongodb://mongodb:27017/ikmb-dashboard`)
-- Backend also receives `ML_API_URL=http://ml-api:8000` for communicating with the ML service
-
----
-
-## 11. Testing Summary
-
-| Layer | Technology | File(s) | Coverage |
-|---|---|---|---|
-| Frontend (component) | Vitest + React Testing Library | `src/__tests__/Login.test.jsx` | Login form rendering, failed login error display |
-| Backend (API) | Jest + Supertest | `backend/__tests__/auth.test.js` | Successful login (mocked), wrong password (mocked) |
-| Backend (security) | Jest + Supertest | `backend/__tests__/items.test.js` | Token enforcement (403 without token, 401 with bad token) |
-| ML service | pytest + FastAPI TestClient | `ML/test_ml.py` | Health check, valid prediction, invalid input (422) |
-
-> Note: Backend tests in `auth.test.js` mock `auth.model.js` functions, meaning they do not test the actual MongoDB integration. The `items.test.js` tests run against the real Express app but will attempt a MongoDB connection (controlled by `NODE_ENV` check in `server.js`).
-
----
-
-## 12. Key Application Features & User Flows
-
-### Admin/Staff Flow
-1. **Login** at `/` with `admin@ikmb.edu.my` / `password123`
-2. Redirected to `/staff-dashboard`
-3. **Overview**: See aggregate statistics, PLO comparisons, high-risk list, and top performers
-4. **AI Prediction**: Manually input student data and run an ML prediction
-5. **Skills Gap**: View the current state of each PLO across the institute
-6. **Pathways**: See recommended workshops/training to close skill gaps
-7. **Manage Students**: Add, edit, delete, and search student records
-8. **View Profile**: Click any student card to see detailed `/student-profile?id=...` with PLO radar, CGPA trends, AI insight, and prescriptive interventions
-
-### Student Flow
-1. **Login** at `/` with `{studentId}@student.ikmb.edu.my` / `password123`
-2. Redirected to `/student-dashboard`
-3. Views **only their own data** (frontend filters the API response on the client side based on `studentId` stored in JWT)
-4. **Profil & Prestasi**: Sees their PLO radar chart, employability score, and AI insight
-5. **Kerjaya**: Views personalized AI-matched career cards for their course
-6. **Kursus**: Sees personalized course recommendations based on their weakest PLO
-
----
-
-## 13. Course Codes Used in the Application
-
-| Code | Full Course Name |
-|---|---|
-| ITW | Diploma Kompetensi Kimpalan (Welding) |
-| DFK | Diploma Teknologi Komputer / Komputasi Awan (Cloud Computing) |
-| DGA | Diploma Teknologi Automotif (Automotive) |
-| SLR | Sijil Teknologi Kejuruteraan Mekanikal / Lukisan Rekabentuk (Design Drafting) |
-| DCG | Diploma Kompetensi Elektrik (Industri) (Electrical Industrial) |
-| SED | Sijil Elektrik Domestik (Domestic Electrical) |
-| PPU | Diploma Penyejukan dan Penyamanan Udara (Air Conditioning & Refrigeration) |
-
----
-
-## 14. PLO (Program Learning Outcomes)
-
-The system analyzes **9 PLOs** for each student, each scored as a percentage (0-100). These represent key competencies expected of TVET graduates:
-
-| PLO | Label | Example Pathway |
-|---|---|---|
-| PLO 1 | Komunikasi Efektif | Kursus Komunikasi Efektif |
-| PLO 2 | Pengaturcaraan | Bengkel Pengaturcaraan |
-| PLO 3 | Keselamatan Industri (OSH) | Latihan OSH |
-| PLO 4 | Pengurusan Projek | Pengurusan Projek |
-| PLO 5 | Inovasi Produk | Inovasi Produk |
-| PLO 6 | Kemahiran Teknikal (Motor/Elektrik) | Kerosakan Motor |
-| PLO 7 | Keusahawanan Digital | Keusahawanan Digital |
-| PLO 8 | Etika & Kepimpinan | Etika & Kepimpinan |
-| PLO 9 | Integriti Profesional | Integriti Profesional |
-
-The institutional target for all PLOs is **80%**. Scores below this threshold trigger skills gap flags in the dashboard.
-
----
-
-## 15. Analytics Layers Implemented
-
-The project implements a complete four-layer analytics framework aligned with the data analytics maturity model:
-
-| Layer | Type | Example in the App |
-|---|---|---|
-| **Descriptive** | "What happened?" | PLO average scores, attendance records, CGPA bar charts |
-| **Diagnostic** | "Why did it happen?" | AI insight messages explaining the weakest skill and gap size |
-| **Predictive** | "What will happen?" | ML-based dropout risk prediction (Rendah/Sederhana/Tinggi) |
-| **Prescriptive** | "What should we do?" | Recommended workshops, career pathways, intervention cards in StudentProfile |
-
----
-
-## 16. File Structure Reference
-
-```
-TVETMARA-Besut-Skills-Talent-Development-Dashboard/
-|-- AGENTS.md                          # AI agent instructions (project tech stack reference)
-|-- compose.yml                        # Docker Compose orchestration (4 services)
-|-- nginx.conf                         # Nginx reverse proxy config for frontend container
-|-- Containerfile.frontend             # Frontend Docker multi-stage build (Node → Nginx)
-|-- .dockerignore                      # Docker build exclusions
-|-- .gitignore                         # Git ignore rules (env, node_modules, dist, db files)
-|-- index.html                         # HTML entry point with Phosphor Icons CDN
-|-- package.json                       # Root package (React, Vite, Vitest, Chart.js)
-|-- package-lock.json                  # Locked dependency tree
-|-- vite.config.js                     # Vite + Vitest config (API proxy, test env)
-|-- tailwind.config.js                 # Tailwind + Plus Jakarta Sans font
-|-- postcss.config.js                  # PostCSS + Tailwind + Autoprefixer
-|-- eslint.config.js                   # ESLint (React Hooks + Vite refresh rules)
-|-- .github/workflows/ci.yml           # GitHub Actions CI/CD pipeline
-|-- inspect_mdb_linux.py               # Utility to inspect .mdb tables on Linux
-|-- logo-tvetmara.jpg                  # TVETMARA logo (served as public asset)
-|
-|-- src/                               # ⭐ FRONTEND SOURCE
-|   |-- main.jsx                       # React entry point
-|   |-- App.jsx                        # Router + ProtectedRoute logic
-|   |-- App.css                        # Default Vite CSS (mostly unused)
-|   |-- index.css                      # Global styles + Tailwind imports
-|   |-- utils/
-|   |   `-- auth.js                    # Auth helpers (localStorage, role mapping)
-|   |-- pages/
-|   |   |-- Login.jsx                  # Login page
-|   |   |-- StaffDashboard.jsx         # Admin dashboard (5 tabs)
-|   |   |-- StudentDashboard.jsx       # Student dashboard (3 tabs, self-only data)
-|   |   `-- StudentProfile.jsx         # Detailed student profile + prescriptive analytics
-|   |-- components/
-|   |   |-- Sidebar.jsx                # Shared sidebar navigation component
-|   |   |-- KpiCard.jsx                # Stat card with progress bar
-|   |   |-- StudentModal.jsx           # Add/Edit student modal dialog
-|   |   `-- JobCard.jsx                # Job recommendation card
-|   `-- __tests__/
-|       `-- Login.test.jsx             # Frontend unit test (Login component)
-|
-|-- backend/                           # ⭐ BACKEND SOURCE
-|   |-- server.js                      # Express app entry + Swagger + MongoDB connect
-|   |-- auth.js                        # Auth routes (login, get users)
-|   |-- items.js                       # Student CRUD + AI prediction routes
-|   |-- auth.model.js                  # User authentication logic (bcrypt, JWT)
-|   |-- item.model.js                  # Student business logic (normalise, skill gap, AI)
-|   |-- middleware/
-|   |   `-- authMiddleware.js          # JWT token verification middleware
-|   |-- models/
-|   |   |-- User.js                    # Mongoose User schema
-|   |   `-- Student.js                 # Mongoose Student schema
-|   |-- seed.js                        # Database seeder (JSON → MongoDB + hashed passwords)
-|   |-- babel.config.json              # Babel config for Jest (not used in prod)
-|   |-- package.json                   # Backend deps (Express, JWT, bcrypt, mongoose, Swagger)
-|   |-- package-lock.json
-|   |-- .env                           # Environment variables (git-ignored)
-|   |-- .env.example                   # Template for environment variables
-|   |-- __tests__/
-|   |   |-- auth.test.js              # Auth API tests (mocked)
-|   |   `-- items.test.js             # Student API security tests
-|   `-- db/                            # Data processing scripts + raw/processed datasets
-|       |-- data_tvet_muktamad.json    # Cleaned student dataset (with academicHistory)
-|       |-- data_tvet.json             # Earlier version of student dataset
-|       |-- Ekspot_Senat.mdb           # Original raw Microsoft Access database file
-|       |-- pelajar.csv               # Extracted student list from MDB
-|       |-- Daftar_Subjek.csv         # Extracted enrollment records from MDB
-|       |-- GPA.csv                   # Extracted GPA history from MDB
-|       |-- Detail_Result.csv         # Extracted exam/PLO results from MDB
-|       |-- Anugerah.csv              # Extracted awards from MDB
-|       |-- Layak_Sijil.csv           # Certification eligibility data
-|       |-- Tidak_Lengkap.csv         # Incomplete records data
-|       |-- Detail_Result.csv         # Detailed result breakdown
-|       |-- ml_training_data_real.csv # Final ML training dataset (output of prepare_ml_data.py)
-|       |-- login_users.json          # Login user reference data
-|       |-- prepare_ml_data.py        # ETL: MDB → merged CSV for ML training
-|       |-- extract_history.py        # ETL: Builds academicHistory and updates JSON
-|       |-- ekstrak_mdb.py            # MDB extraction helper
-|       `-- sedut_mdb_tulen.py        # Direct raw MDB extraction script
-|
-|-- ML/                                # ⭐ ML SERVICE SOURCE (Python / FastAPI)
-|   |-- ml.py                          # FastAPI server (predict/risk endpoint)
-|   |-- train_and_evaluate.py          # Model training script (RandomForest + GridSearch)
-|   |-- test_ml.py                     # ML API tests (pytest)
-|   |-- requirements.txt               # Python dependencies
-|   |-- Containerfile                  # ML Docker image (Python Slim + Uvicorn)
-|   |-- model_ai_risiko_lengkap_v3.pkl # Production ML model (V3 — trained on real data)
-|   |-- model_ai_risiko_lengkap_v2.pkl # Previous model version (V2)
-|   `-- model_ai_tvet_besut.pkl       # Initial/baseline model (V1)
-|
-|-- mongodb_data/                      # Persistent MongoDB volume data
-|-- dist/                              # Vite production build output (git-ignored)
-|-- node_modules/                      # Root dependencies (git-ignored)
-`-- backend/node_modules/              # Backend dependencies (git-ignored)
-```
-
----
-
-## 17. Environment Variables
-
-| Variable | Where | Purpose | Default/Example |
-|---|---|---|---|
-| `PORT` | Backend `.env` | Express server port | `5001` |
-| `MONGO_URI` | Backend `.env` | MongoDB connection string | `mongodb://127.0.0.1:27017/ikmb-dashboard` |
-| `JWT_SECRET` | Backend `.env` | Secret key for signing JWTs | (must be set securely) |
-| `PORT` | Root `.env` | Port number; also used by `vite.config.js` to proxy to backend | `5000` |
-
-Both `PORT` and `JWT_SECRET` are sensitive and are **excluded from version control** via `.gitignore`.
-
----
-
-## 18. Default Test Accounts
-
-| Email | Password | Role | Access |
-|---|---|---|---|
-| `admin@ikmb.edu.my` | `password123` | admin | Staff Dashboard + Student Profile |
-| `user@ikmb.edu.my` | `password123` | user | Student Dashboard (no profile access) |
-| `{studentId}@student.ikmb.edu.my` | `password123` | user | Student Dashboard (own data only) |
-
-All student accounts are created during database seeding with the same default password.
-
----
-
-*This summary covers all source code files, configuration files, data pipeline scripts, and deployment configurations present in the project as of this document's creation.*
+Last modified: 2026-08-27 15:30:00

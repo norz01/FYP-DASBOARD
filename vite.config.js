@@ -9,6 +9,8 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
+      // 👈 Membenarkan host/domain tersebut
+      allowedHosts: ['dashboard-bak.tvetdfk.com'],
       proxy: {
         '/api': {
           target: `http://localhost:${apiPort}`,

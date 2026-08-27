@@ -1,9 +1,10 @@
-import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom';
-import Login from './pages/Login';
-import StaffDashboard from './pages/StaffDashboard';
-import StudentDashboard from './pages/StudentDashboard';
-import StudentProfile from './pages/StudentProfile';
-import { getDashboardPathForRole, getStoredUser } from './utils/auth';
+import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
+import { useState, useEffect } from "react"; // Tambah import ini
+import Login from "./pages/Login";
+import StaffDashboard from "./pages/StaffDashboard";
+import StudentDashboard from "./pages/StudentDashboard";
+import StudentProfile from "./pages/StudentProfile";
+import { getDashboardPathForRole, getStoredUser } from "./utils/auth";
 
 function ProtectedRoute({ allowedRoles, children }) {
   const currentUser = getStoredUser();
@@ -20,7 +21,20 @@ function ProtectedRoute({ allowedRoles, children }) {
 }
 
 export default function App() {
-  const currentUser = getStoredUser();
+  // Gantikan const biasa dengan useState supaya boleh re-render
+  const [currentUser, setCurrentUser] = useState(getStoredUser());
+
+  useEffect(() => {
+    // Dengar event dari auth.js
+    const handleAuthChange = () => {
+      setCurrentUser(getStoredUser());
+    };
+
+    window.addEventListener("authChange", handleAuthChange);
+
+    // Cleanup listener
+    return () => window.removeEventListener("authChange", handleAuthChange);
+  }, []);
 
   return (
     <BrowserRouter>
@@ -29,26 +43,29 @@ export default function App() {
           path="/"
           element={
             currentUser ? (
-              <Navigate to={getDashboardPathForRole(currentUser.role)} replace />
+              <Navigate
+                to={getDashboardPathForRole(currentUser.role)}
+                replace
+              />
             ) : (
               <Login />
             )
           }
         />
-        
+
         <Route
           path="/staff-dashboard"
           element={
-            <ProtectedRoute allowedRoles={['admin']}>
+            <ProtectedRoute allowedRoles={["admin"]}>
               <StaffDashboard />
             </ProtectedRoute>
           }
         />
-        
+
         <Route
           path="/student-dashboard"
           element={
-            <ProtectedRoute allowedRoles={['user']}>
+            <ProtectedRoute allowedRoles={["user"]}>
               <StudentDashboard />
             </ProtectedRoute>
           }
@@ -57,12 +74,11 @@ export default function App() {
         <Route
           path="/student-profile"
           element={
-            <ProtectedRoute allowedRoles={['admin']}>
+            <ProtectedRoute allowedRoles={["admin"]}>
               <StudentProfile />
             </ProtectedRoute>
           }
         />
-        
       </Routes>
     </BrowserRouter>
   );

@@ -1,289 +1,564 @@
 // src/pages/StudentProfile.jsx
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import {
-  Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, RadialLinearScale, Title, Tooltip, Legend, Filler
-} from 'chart.js';
-import { Bar, Radar } from 'react-chartjs-2';
-import { getToken } from '../utils/auth';
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  BarController,
+  LineController,
+  Title,
+  Tooltip,
+  Legend,
+  RadialLinearScale,
+  PointElement,
+  LineElement,
+  Filler,
+} from "chart.js";
+import { Bar, Radar } from "react-chartjs-2";
+import { getToken } from "../utils/auth";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, RadialLinearScale, Title, Tooltip, Legend, Filler);
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  BarController,
+  LineController,
+  RadialLinearScale,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+);
 
 const getFullCourseName = (code) => {
-    const names = {
-        'ITW': 'Diploma Kompetensi Kimpalan',
-        'DFK': 'Diploma Teknologi Komputer (Komputasi Awan)',
-        'DGA': 'Diploma Teknologi Automotif',
-        'SLR': 'Sijil Teknologi Kejuruteraan Mekanikal (Lukisan Rekabentuk)',
-        'DCG': 'Diploma Kompetensi Elektrik (Industri)',
-        'SED': 'Sijil Teknologi Kejuruteraan Elektrik (Domestik dan Industri)',
-        'PPU': 'Diploma Teknologi Penyejukan dan Penyamanan Udara'
-    };
-    return names[code] || code;
+  const names = {
+    ITW: "Diploma Kompetensi Kimpalan",
+    DFK: "Diploma Teknologi Komputer (Komputasi Awan)",
+    DGA: "Diploma Teknologi Automotif",
+    SLR: "Sijil Teknologi Kejuruteraan Mekanikal (Lukisan Rekabentuk)",
+    DCG: "Diploma Kompetensi Elektrik (Industri)",
+    SED: "Sijil Teknologi Kejuruteraan Elektrik (Domestik dan Industri)",
+    PPU: "Diploma Teknologi Penyejukan dan Penyamanan Udara",
+  };
+  return names[code] || code || "Kursus Tidak Diketahui";
+};
+
+const StatusBadge = ({ status }) => {
+  let color = "bg-gray-100 text-gray-800 border-gray-200";
+  let label = status || "Sederhana";
+  let icon = "ph-info";
+
+  if (label === "Tinggi" || label === "Bermasalah") {
+    color = "bg-red-50 text-red-700 border-red-200";
+    label = "Tinggi";
+    icon = "ph-warning-octagon";
+  } else if (label === "Sederhana") {
+    color = "bg-amber-50 text-amber-700 border-amber-200";
+    label = "Sederhana";
+    icon = "ph-clock";
+  } else if (label === "Rendah" || label === "Cemerlang") {
+    color = "bg-emerald-50 text-emerald-700 border-emerald-200";
+    label = "Rendah";
+    icon = "ph-check-circle";
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${color} bg-opacity-90 backdrop-blur-sm shadow-sm`}
+    >
+      <i className={`ph-fill ${icon} text-sm`}></i> {label}
+    </span>
+  );
 };
 
 export default function StudentProfile() {
-    const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
-    const studentId = searchParams.get('id') || 'TVET001';
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const studentId = searchParams.get("id") || "TVET001";
 
-    const [skillGap, setSkillGap] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+  const [skillGap, setSkillGap] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState("personal");
 
-    useEffect(() => {
-        const fetchSkillGap = async () => {
-            try {
-                const token = getToken(); 
-                const response = await fetch(`/api/students/${studentId}/skill-gap`, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    }
-                });
+  useEffect(() => {
+    const fetchSkillGap = async () => {
+      try {
+        const token = getToken();
+        const response = await fetch(`/api/students/${studentId}/skill-gap`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
 
-                if (!response.ok) {
-                    throw new Error('Tiada data pelajar dijumpai untuk akaun ini.');
-                }
-                
-                const data = await response.json();
-                setSkillGap(data);
-            } catch (err) {
-                setError(err.message);
-            } finally {
-                setLoading(false);
-            }
-        };
+        if (!response.ok)
+          throw new Error("Tiada data pelajar dijumpai untuk akaun ini.");
 
-        fetchSkillGap();
-    }, [studentId]);
+        const data = await response.json();
+        setSkillGap(data);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    // Dynamic Colors based on Risk
-    const riskLevel = skillGap?.student?.dropoutRisk;
-    const insightColor = riskLevel === 'Rendah' ? 'text-green-400' : riskLevel === 'Sederhana' ? 'text-yellow-400' : 'text-red-400';
-    const insightBar = riskLevel === 'Rendah' ? 'bg-green-500' : riskLevel === 'Sederhana' ? 'bg-yellow-500' : 'bg-red-500';
-    const avatarBg = riskLevel === 'Rendah' ? 'bg-green-500' : riskLevel === 'Sederhana' ? 'bg-yellow-500' : 'bg-red-500';
+    fetchSkillGap();
+  }, [studentId]);
 
-    // Correct Employability Calculation
-    const employabilityScore = skillGap?.student ? Math.min(100, Math.round((skillGap.student.cgpa / 4) * 40 + (skillGap.student.attendance * 0.6))) : 0;
-
-// DATA UNTUK GRAF TREND (Real Data with Fallback)
-const historyData = skillGap?.student?.academicHistory || [];
-const labels = historyData.length > 0 ? historyData.map(h => `Sem ${h.semester}`) : ['Semasa'];
-const cgpaData = historyData.length > 0 ? historyData.map(h => h.cgpa) : [skillGap?.student?.cgpa || 0];
-const attendanceData = historyData.length > 0 ? historyData.map(h => h.attendance) : [skillGap?.student?.attendance || 0];
-const trendData = {
-labels: labels,
-datasets:[
-{
-type: 'line',
-label: 'CGPA',
-data: cgpaData,
-borderColor: '#2563EB',
-backgroundColor: '#2563EB',
-borderWidth: 2,
-tension: 0.3,
-yAxisID: 'y',
-},
-{
-type: 'bar',
-label: 'Kehadiran (%)',
-data: attendanceData,
-backgroundColor: 'rgba(16, 185, 129, 0.2)',
-borderColor: '#10B981',
-borderWidth: 1,
-borderRadius: 4,
-yAxisID: 'y1',
-}
-]
-};
-
-    // DATA UNTUK GRAF RADAR
-    const skillData = skillGap ? {
-        labels: skillGap.chart.labels,
-        datasets:[
-            {
-                label: `Data Pelajar (${studentId})`,
-                data: skillGap.chart.current,
-                fill: true,
-                backgroundColor: 'rgba(37, 99, 235, 0.2)',
-                borderColor: '#2563EB',
-                pointBackgroundColor: '#2563EB'
-            }, 
-            {
-                label: 'Target Kursus',
-                data: skillGap.chart.target,
-                fill: true,
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                borderColor: '#10B981',
-                borderDash: [5, 5],
-                pointBackgroundColor: '#10B981'
-            }
-        ]
-    } : null;
-
-    const hasZeroScore = skillGap?.chart.current.some((s) => s === 0);
-
+  if (loading)
     return (
-        <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans pb-20">
-            
-            <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
-                <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-                    <button onClick={() => navigate('/staff-dashboard')} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-medium transition-colors">
-                        <i className="ph-bold ph-arrow-left text-xl"></i> Kembali ke Dashboard
-                    </button>
-                    <div className="font-bold text-blue-700 flex items-center gap-2">
-                        <i className="ph-fill ph-brain"></i> IKMB AI-Hub
-                    </div>
-                </div>
-            </nav>
-
-            <main className="max-w-6xl mx-auto px-4 mt-8 space-y-6 animate-[fadeIn_0.3s_ease-in-out]">
-
-                {loading ? (
-                    <div className="min-h-[50vh] flex items-center justify-center text-slate-500">Memuatkan data pelajar...</div>
-                ) : error ? (
-                    <div className="min-h-[50vh] flex items-center justify-center text-red-500 font-bold">{error}</div>
-                ) : (
-                    <>
-                        {/* HEADER: PROFIL & AI STATUS */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            {/* Info Pelajar */}
-                            <div className="lg:col-span-2 bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-slate-100 flex flex-col md:flex-row gap-6 items-start md:items-center">
-                                <div className={`w-24 h-24 md:w-32 md:h-32 rounded-full border-4 border-slate-50 shadow-md ${avatarBg} flex items-center justify-center text-white text-4xl font-bold`}>
-                                    {studentId.slice(-2)}
-                                </div>
-                                <div className="flex-1">
-                                    <div className="flex flex-wrap items-center gap-3 mb-1">
-                                        <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
-                                            {skillGap?.student.nama || `Pelajar ${studentId}`}
-                                        </h1>
-                                        <span className={`border px-3 py-1 rounded-full text-xs font-bold ${
-                                            riskLevel === 'Tinggi' ? 'bg-red-100 text-red-700 border-red-200' : 
-                                            riskLevel === 'Rendah' ? 'bg-green-100 text-green-700 border-green-200' : 
-                                            'bg-yellow-100 text-yellow-700 border-yellow-200'
-                                        }`}>
-                                            {riskLevel}
-                                        </span>
-                                        {skillGap?.student.anugerah && (
-                                            <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-bold border border-amber-200 flex items-center gap-1">
-                                                <i className="ph-fill ph-trophy"></i> Anugerah
-                                            </span>
-                                        )}
-                                        {skillGap?.student.kokoLulus && (
-                                            <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold border border-emerald-200 flex items-center gap-1">
-                                                <i className="ph-fill ph-check-circle"></i> Koko Lulus
-                                            </span>
-                                        )}
-                                    </div>
-                                    <p className="text-slate-500 font-mono text-sm mb-3">No. Matrik: {studentId}</p>
-                                    
-                                    <div className="grid grid-cols-2 gap-y-2 gap-x-6 text-sm">
-                                        <p className="text-slate-600 col-span-2">
-                                            <span className="font-semibold">Kursus:</span> {getFullCourseName(skillGap?.student.kursus)}
-                                        </p>
-                                        <p className="text-slate-600"><span className="font-semibold">Semester:</span> Semester {skillGap?.student.semester || '2'}</p>
-                                        <p className="text-slate-600"><span className="font-semibold">Sijil:</span> {skillGap?.student.certification || 'Tiada'}</p>
-                                        <p className="text-slate-600"><span className="font-semibold">Kehadiran:</span> <span className="text-blue-600 font-bold">{skillGap?.student.attendance}%</span></p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* AI Insight */}
-                            <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 shadow-sm border border-slate-700 text-white flex flex-col justify-center relative overflow-hidden">
-                                <i className="ph-fill ph-magic-wand absolute -right-4 -bottom-4 text-7xl text-white/5"></i>
-                                <h3 className="text-slate-300 font-medium text-sm mb-2 flex items-center gap-2">
-                                    <i className="ph-fill ph-robot"></i> Ramalan Kebolehpasaran (AI)
-                                </h3>
-                                <div className="flex items-end gap-2 mb-4">
-                                    <span className={`text-5xl font-bold ${insightColor}`}>{employabilityScore}%</span>
-                                    <span className="text-slate-400 text-sm mb-1">/ 100%</span>
-                                </div>
-                                <div className="w-full bg-slate-700 h-2 rounded-full overflow-hidden mb-4">
-                                    <div className={`${insightBar} h-full rounded-full transition-all duration-500`} style={{width: `${employabilityScore}%`}}></div>
-                                </div>
-                                <p className="text-xs text-slate-400 leading-relaxed">
-                                    {skillGap.insight.message}
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* GRAF PRESTASI */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="font-bold text-slate-800">Sejarah Akademik & Kehadiran</h3>
-                                    <button className="text-xs font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-lg hover:bg-blue-100">Muat Turun</button>
-                                </div>
-                                <div className="h-64 w-full"><Bar data={trendData} options={{ maintainAspectRatio: false, scales: { y: { type: 'linear', display: true, position: 'left', max: 4, title: { display: true, text: 'CGPA' } }, y1: { type: 'linear', display: true, position: 'right', max: 100, title: { display: true, text: 'Kehadiran (%)' }, grid: { drawOnChartArea: false } } } }} /></div>
-                            </div>
-
-                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h3 className="font-bold text-slate-800">Radar Kemahiran Individu</h3>
-                                    {hasZeroScore && (
-                                        <div className="text-[10px] text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-200 flex items-center gap-1 font-bold">
-                                            <i className="ph-fill ph-info"></i> DATA PLO BELUM LENGKAP
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="h-64 w-full flex flex-col items-center">
-                                    {skillData && <Radar 
-                                        data={skillData} 
-                                        options={{ 
-                                            maintainAspectRatio: false,
-                                            scales: {
-                                                r: {
-                                                    min: 0,
-                                                    max: 100,
-                                                    beginAtZero: true,
-                                                    ticks: {
-                                                        stepSize: 20
-                                                    }
-                                                }
-                                            }
-                                        }} 
-                                    />}
-                                    {hasZeroScore && (
-                                        <p className="text-[10px] text-slate-400 mt-2 italic">* Skor 0% mungkin disebabkan penilaian PLO belum direkodkan oleh pensyarah.</p>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* INTERVENSI (PRESCRIPTIVE ANALYTICS) */}
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                            <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2 mb-6">
-                                <i className="ph-fill ph-stethoscope text-blue-600"></i> Cadangan Intervensi (Prescriptive Analytics)
-                            </h3>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="border border-red-100 bg-red-50/50 p-4 rounded-xl">
-                                    <div className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold mb-3">1</div>
-                                    <h4 className="font-bold text-slate-800 text-sm mb-1">Kaunseling Kehadiran</h4>
-                                    <p className="text-xs text-slate-500 mb-3">Kehadiran jatuh bawah 80% pada bulan lepas. Jadualkan sesi perjumpaan segera.</p>
-                                    <button onClick={() => alert('Temujanji berjaya dihantar kepada pelajar!')} className="w-full text-xs font-bold text-red-600 border border-red-200 bg-white py-2 rounded-lg hover:bg-red-50 transition">Set Temujanji</button>
-                                </div>
-
-                                <div className="border border-orange-100 bg-orange-50/50 p-4 rounded-xl">
-                                    <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold mb-3">2</div>
-                                    <h4 className="font-bold text-slate-800 text-sm mb-1">Klinik Akademik (Python)</h4>
-                                    <p className="text-xs text-slate-500 mb-3">Markah subjek Programming merosot. Masukkan pelajar dalam kelas bimbingan tambahan.</p>
-                                    <button className="w-full text-xs font-bold text-orange-600 border border-orange-200 bg-white py-2 rounded-lg hover:bg-orange-50 transition">Daftar Klinik</button>
-                                </div>
-
-                                <div className="border border-blue-100 bg-blue-50/50 p-4 rounded-xl">
-                                    <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mb-3">3</div>
-                                    <h4 className="font-bold text-slate-800 text-sm mb-1">Pembangunan Soft Skills</h4>
-                                    <p className="text-xs text-slate-500 mb-3">Kemahiran komunikasi memuaskan. Tingkatkan melalui kem kepimpinan.</p>
-                                    <button className="w-full text-xs font-bold text-blue-600 border border-blue-200 bg-white py-2 rounded-lg hover:bg-blue-50 transition">Lihat Program</button>
-                                </div>
-                            </div>
-                        </div>
-                    </>
-                )}
-            </main>
-        </div>
+      <div className="min-h-screen flex justify-center items-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#1251AA]"></div>
+      </div>
     );
+  if (error)
+    return (
+      <div className="min-h-screen flex justify-center items-center text-red-500 font-bold">
+        {error}
+      </div>
+    );
+  if (!skillGap || !skillGap.student)
+    return (
+      <div className="min-h-screen flex justify-center items-center">
+        Pelajar tidak dijumpai.
+      </div>
+    );
+
+  const { student, chart = {}, insight = {} } = skillGap;
+
+  const cgpaVal = parseFloat(student.cgpa) || 0;
+  const attendanceVal = parseFloat(student.attendance) || 0;
+
+  let cgpaColor = "bg-red-500";
+  if (cgpaVal >= 3.5) cgpaColor = "bg-emerald-500";
+  else if (cgpaVal >= 2.5) cgpaColor = "bg-amber-500";
+
+  const historyData = Array.isArray(student.academicHistory)
+    ? student.academicHistory
+    : [];
+  const labels =
+    historyData.length > 0
+      ? historyData.map((h) => `Sem ${h.semester || "?"}`)
+      : ["Semasa"];
+
+  // FIX: Removed || h.cgpa so it strictly uses GPA per semester
+  const gpaData =
+    historyData.length > 0
+      ? historyData.map((h) => parseFloat(h.gpa) || 0)
+      : [cgpaVal];
+  const attendanceData =
+    historyData.length > 0
+      ? historyData.map((h) => parseFloat(h.attendance) || 0)
+      : [attendanceVal];
+
+  const trendData = {
+    labels: labels,
+    datasets: [
+      {
+        type: "line",
+        label: "GPA",
+        data: gpaData,
+        borderColor: "#2563EB",
+        backgroundColor: "#2563EB",
+        borderWidth: 2,
+        tension: 0.3,
+        yAxisID: "y",
+      },
+      {
+        type: "bar",
+        label: "Kehadiran (%)",
+        data: attendanceData,
+        backgroundColor: "rgba(16, 185, 129, 0.2)",
+        borderColor: "#10B981",
+        borderWidth: 1,
+        borderRadius: 4,
+        yAxisID: "y1",
+      },
+    ],
+  };
+
+  const radarLabels =
+    chart.labels || Array.from({ length: 9 }, (_, i) => `PLO ${i + 1}`);
+  const radarCurrent = chart.current || Array(9).fill(0);
+  const radarTarget = chart.target || Array(9).fill(80);
+
+  const radarData = {
+    labels: radarLabels,
+    datasets: [
+      {
+        label: `Data Pelajar (${studentId})`,
+        data: radarCurrent,
+        fill: true,
+        backgroundColor: "rgba(37, 99, 235, 0.2)",
+        borderColor: "#2563EB",
+        pointBackgroundColor: "#2563EB",
+      },
+      {
+        label: "Target Kursus",
+        data: radarTarget,
+        fill: true,
+        backgroundColor: "rgba(16, 185, 129, 0.1)",
+        borderColor: "#10B981",
+        borderDash: [5, 5],
+        pointBackgroundColor: "#10B981",
+      },
+    ],
+  };
+
+  const hasZeroScore = radarCurrent.some((s) => s === 0);
+  const employabilityScore = Math.min(
+    100,
+    Math.round((cgpaVal / 4) * 40 + attendanceVal * 0.6),
+  );
+
+  const handlePrint = () => window.print();
+
+  const handleDownload = () => {
+    const exportData = {
+      studentDetails: student,
+      academicHistory: student.academicHistory || [],
+      aiInsight: insight.message || "Tiada insight",
+      employabilityScore: employabilityScore,
+      ploScores: radarLabels.map((label, i) => ({
+        plo: label,
+        score: radarCurrent[i],
+        target: radarTarget[i],
+      })),
+    };
+    const jsonString = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Profil_Pelajar_${student.id || "unknown"}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#EEF3FB] p-6 font-sans">
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm">
+          <button
+            onClick={() => navigate("/staff-dashboard")}
+            className="flex items-center gap-1 text-[#5A6A85] hover:text-[#1251AA] font-medium"
+          >
+            <i className="ph-bold ph-arrow-left"></i> Senarai Pelajar
+          </button>
+          <span className="text-[#5A6A85]">/</span>
+          <span className="font-medium text-[#0A1628]">{student.nama}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Panel */}
+        <div className="lg:col-span-1">
+          <div className="bg-white rounded-xl shadow-sm border border-[rgba(18,81,170,0.13)] overflow-hidden sticky top-6">
+            <div className="h-24 bg-[#0C2461] p-4 flex justify-between items-start">
+              <div>
+                <p className="text-white font-bold text-sm">TVETMARA IKMB</p>
+                <p className="text-white/70 text-xs">
+                  Sistem Pengurusan Pelajar
+                </p>
+              </div>
+              <StatusBadge status={student.dropoutRisk} />
+            </div>
+
+            <div className="px-6 pb-6 -mt-12 text-center">
+              <div className="w-24 h-24 mx-auto rounded-full bg-[#1251AA] text-white text-4xl font-bold flex items-center justify-center border-4 border-white mb-3">
+                {student.nama?.charAt(0) || "?"}
+              </div>
+              <h2 className="text-lg font-bold text-[#0A1628]">
+                {student.nama || "Nama Tidak Diketahui"}
+              </h2>
+              <p className="text-sm text-[#5A6A85] font-mono">{student.id}</p>
+
+              <div className="mt-6 space-y-3 text-left">
+                <div className="flex justify-between text-sm py-2 border-b border-gray-100">
+                  <span className="text-[#5A6A85]">Kursus</span>
+                  <span className="font-medium text-[#0A1628] text-right">
+                    {getFullCourseName(student.kursus)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm py-2 border-b border-gray-100">
+                  <span className="text-[#5A6A85]">Semester</span>
+                  <span className="font-medium text-[#0A1628]">
+                    {student.semester || "2"}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm py-2 border-b border-gray-100">
+                  <span className="text-[#5A6A85]">Sijil</span>
+                  <span className="font-medium text-[#0A1628]">
+                    {student.certification || "Tiada"}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm py-2">
+                  <span className="text-[#5A6A85]">Kehadiran</span>
+                  <span className="font-medium text-[#0A1628]">
+                    {attendanceVal}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-3 gap-2">
+                <button className="bg-[#1251AA] text-white py-2 rounded-lg text-xs font-medium hover:bg-[#0C2461] flex items-center justify-center gap-1">
+                  <i className="ph-bold ph-pencil-simple"></i> Edit
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="bg-gray-100 text-[#5A6A85] py-2 rounded-lg text-xs font-medium hover:bg-gray-200 flex items-center justify-center transition-colors"
+                >
+                  <i className="ph-bold ph-printer"></i>
+                </button>
+                <button
+                  onClick={handleDownload}
+                  className="bg-gray-100 text-[#5A6A85] py-2 rounded-lg text-xs font-medium hover:bg-gray-200 flex items-center justify-center transition-colors"
+                >
+                  <i className="ph-bold ph-download-simple"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Panel */}
+        <div className="lg:col-span-2">
+          <div className="bg-white rounded-xl shadow-sm border border-[rgba(18,81,170,0.13)]">
+            <div className="border-b border-gray-200 flex">
+              {["personal", "academic", "skills"].map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === tab ? "border-[#1251AA] text-[#1251AA]" : "border-transparent text-[#5A6A85] hover:text-[#0A1628]"}`}
+                >
+                  {tab === "personal"
+                    ? "Maklumat Peribadi"
+                    : tab === "academic"
+                      ? "Rekod Akademik"
+                      : "PLO & AI Insight"}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-6">
+              {activeTab === "personal" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <h3 className="text-sm uppercase tracking-wide text-[#5A6A85] font-medium">
+                      Maklumat Asas
+                    </h3>
+                    <div>
+                      <label className="text-xs text-[#5A6A85]">Email</label>
+                      <p className="text-sm text-[#0A1628] font-mono mt-1 break-all">
+                        {student.id}@student.ikmb.edu.my
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-xs text-[#5A6A85]">
+                        No. Telefon
+                      </label>
+                      <p className="text-sm text-[#0A1628] font-mono mt-1">
+                        {student.noTelefon || "Tiada Rekod"}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-xs text-[#5A6A85]">No. KP</label>
+                      <p className="text-sm text-[#0A1628] font-mono mt-1">
+                        {student.noKP || "Tiada Rekod"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <h3 className="text-sm uppercase tracking-wide text-[#5A6A85] font-medium">
+                      Alamat
+                    </h3>
+                    <p className="text-sm text-[#0A1628] leading-relaxed">
+                      {student.alamat || "Tiada Rekod"}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "academic" && (
+                <div className="space-y-6">
+                  <div className="bg-[#EEF3FB] p-4 rounded-lg flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-[#5A6A85]">
+                        Purata Gred Kumulatif (CGPA)
+                      </p>
+                      <p className="text-3xl font-bold text-[#0A1628] mt-1">
+                        {cgpaVal.toFixed(2)}{" "}
+                        <span className="text-base font-normal text-[#5A6A85]">
+                          / 4.00
+                        </span>
+                      </p>
+                    </div>
+                    <div className="w-1/2 bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className={`${cgpaColor} h-full rounded-full`}
+                        style={{ width: `${(cgpaVal / 4) * 100}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  <div className="border border-gray-100 p-4 rounded-lg">
+                    <h4 className="text-sm font-medium text-[#0A1628] mb-4">
+                      Trend GPA & Kehadiran
+                    </h4>
+                    <div className="h-64">
+                      <Bar
+                        data={trendData}
+                        options={{
+                          maintainAspectRatio: false,
+                          scales: {
+                            y: {
+                              type: "linear",
+                              display: true,
+                              position: "left",
+                              max: 4,
+                              title: { display: true, text: "GPA" },
+                            },
+                            y1: {
+                              type: "linear",
+                              display: true,
+                              position: "right",
+                              max: 100,
+                              title: { display: true, text: "Kehadiran (%)" },
+                              grid: { drawOnChartArea: false },
+                            },
+                          },
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "skills" && (
+                <div className="space-y-6">
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-4 rounded-lg text-white relative overflow-hidden">
+                    <i className="ph-fill ph-magic-wand absolute -right-4 -bottom-4 text-7xl text-white/5"></i>
+                    <h4 className="text-slate-300 font-medium text-sm mb-2 flex items-center gap-2">
+                      <i className="ph-fill ph-robot"></i> Ramalan
+                      Kebolehpasaran (AI)
+                    </h4>
+                    <div className="flex items-end gap-2 mb-4">
+                      <span className="text-5xl font-bold">
+                        {employabilityScore}%
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      {insight.message ||
+                        "Tiada analisis AI tersedia buat masa ini."}
+                    </p>
+                  </div>
+
+                  <div className="border border-gray-100 p-4 rounded-lg">
+                    <div className="flex justify-between items-center mb-4">
+                      <h4 className="text-sm font-medium text-[#0A1628]">
+                        Analisis Kemahiran (PLO)
+                      </h4>
+                      {hasZeroScore && (
+                        <div className="text-[10px] text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-200 flex items-center gap-1 font-bold">
+                          <i className="ph-fill ph-info"></i> DATA PLO BELUM
+                          LENGKAP
+                        </div>
+                      )}
+                    </div>
+                    <div className="h-72">
+                      <Radar
+                        data={radarData}
+                        options={{
+                          maintainAspectRatio: false,
+                          scales: {
+                            r: {
+                              min: 0,
+                              max: 100,
+                              beginAtZero: true,
+                              ticks: { stepSize: 20 },
+                            },
+                          },
+                        }}
+                      />
+                    </div>
+                    {hasZeroScore && (
+                      <p className="text-xs text-slate-400 italic mt-4">
+                        Skor 0% mungkin disebabkan penilaian PLO belum
+                        direkodkan oleh pensyarah.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="border border-red-100 bg-red-50/50 p-4 rounded-xl">
+                      <div className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold mb-3">
+                        1
+                      </div>
+                      <h5 className="font-bold text-[#0A1628] text-sm mb-1">
+                        Kaunseling Kehadiran
+                      </h5>
+                      <p className="text-xs text-[#5A6A85] mb-3">
+                        Kehadiran jatuh bawah 80% pada bulan lepas. Jadualkan
+                        sesi perjumpaan segera.
+                      </p>
+                      <button
+                        onClick={() => alert("Temujanji berjaya dihantar!")}
+                        className="w-full text-xs font-bold text-red-600 border border-red-200 bg-white py-2 rounded-lg hover:bg-red-50 transition"
+                      >
+                        Set Temujanji
+                      </button>
+                    </div>
+                    <div className="border border-orange-100 bg-orange-50/50 p-4 rounded-xl">
+                      <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold mb-3">
+                        2
+                      </div>
+                      <h5 className="font-bold text-[#0A1628] text-sm mb-1">
+                        Klinik Akademik
+                      </h5>
+                      <p className="text-xs text-[#5A6A85] mb-3">
+                        Markah subjek Programming merosot. Masukkan pelajar
+                        dalam kelas bimbingan tambahan.
+                      </p>
+                      <button
+                        onClick={() => alert("Pendaftaran klinik berjaya!")}
+                        className="w-full text-xs font-bold text-orange-600 border border-orange-200 bg-white py-2 rounded-lg hover:bg-orange-50 transition"
+                      >
+                        Daftar Klinik
+                      </button>
+                    </div>
+                    <div className="border border-blue-100 bg-blue-50/50 p-4 rounded-xl">
+                      <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mb-3">
+                        3
+                      </div>
+                      <h5 className="font-bold text-[#0A1628] text-sm mb-1">
+                        Pembangunan Soft Skills
+                      </h5>
+                      <p className="text-xs text-[#5A6A85] mb-3">
+                        Kemahiran komunikasi memuaskan. Tingkatkan melalui kem
+                        kepimpinan.
+                      </p>
+                      <button
+                        onClick={() => alert("Senarai program dipaparkan!")}
+                        className="w-full text-xs font-bold text-blue-600 border border-blue-200 bg-white py-2 rounded-lg hover:bg-blue-50 transition"
+                      >
+                        Lihat Program
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }

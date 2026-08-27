@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'ikmbCurrentUser';
+const STORAGE_KEY = "ikmbCurrentUser";
 
 export function getStoredUser() {
   try {
@@ -11,17 +11,21 @@ export function getStoredUser() {
 
 export function storeUser(user) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+  // Maklumkan kepada seluruh aplikasi bahawa status login telah berubah
+  window.dispatchEvent(new Event("authChange"));
 }
 
 export function clearStoredUser() {
   localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem('ikmbToken');
+  localStorage.removeItem("ikmbToken");
+  // Maklumkan kepada seluruh aplikasi bahawa pengguna telah log keluar
+  window.dispatchEvent(new Event("authChange"));
 }
 
 export function getToken() {
-  return localStorage.getItem('ikmbToken');
+  return localStorage.getItem("ikmbToken");
 }
 
 export function getDashboardPathForRole(role) {
-  return role === 'admin' ? '/staff-dashboard' : '/student-dashboard';
+  return role === "admin" ? "/staff-dashboard" : "/student-dashboard";
 }

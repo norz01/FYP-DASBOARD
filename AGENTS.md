@@ -1,58 +1,90 @@
-# TVETMARA Besut Skills Talent Development Dashboard
+# AGENTS.md — Guide for AI Coding Assistants
 
-## Tech Stack
+This document gives AI agents the context needed to work safely and effectively in this
+repository. Read this before making changes.
 
-This project is a **MERN stack application** with ML integration for student talent development analytics.
+## Project at a glance
+Full-stack FYP dashboard for IKMB (Malaysian TVET college). **UI language is Bahasa
+Melayu.** Four services: React frontend, Express backend, FastAPI ML microservice,
+MongoDB. Orchestration via `compose.yml`.
 
-### Frontend
-- **Framework**: React 19
-- **Build Tool**: Vite 7
-- **Routing**: React Router DOM 7
-- **Styling**: Tailwind CSS 3, PostCSS, Autoprefixer
-- **Charts**: Chart.js 4, react-chartjs-2
-- **Bundling**: ESLint, eslint-plugin-react-hooks, eslint-plugin-react-refresh
-
-### Backend
-- **Runtime**: Node.js
-- **Framework**: Express.js 5
-- **Database**: MongoDB with Mongoose ODM
-- **Authentication**: JWT (jsonwebtoken), bcryptjs
-- **CORS**: cors middleware
-
-### ML Service
-- **Framework**: FastAPI (Python)
-- **Server**: Uvicorn
-- **ML Library**: scikit-learn
-- **Model Serialization**: joblib
-- **Data Validation**: Pydantic
-
-## Project Structure
-
+## Repository map
 ```
-/ML                    # Python ML service (FastAPI)
-/backend               # Backend separate package (placeholder)
-src/                   # React frontend source
-  /pages               # React page components
-  /utils               # Utility functions (auth.js)
-  App.jsx              # Main app component
-  main.jsx             # Entry point
-server.js              # Express server entry point
-auth.js                # Authentication routes
-items.js               # Items API routes
-auth.model.js          # Mongoose auth model
-item.model.js          # Mongoose item model
+src/                 React SPA (pages/, components/, utils/)
+backend/             Express API (server.js, auth.js, items.js, models/, seed.js)
+backend/db/          Ekspot_Senat.mdb + ETL scripts + data files
+ML/                  FastAPI service (ml.py, train_and_evaluate.py, *.pkl)
+compose.yml          4-service orchestration
+Containerfile.frontend, nginx.conf
+.github/workflows/ci.yml
 ```
 
-## Development Commands
+## Commands
+```bash
+# Frontend (repo root)
+npm run dev          # dev server
+npm run build        # production build
+npm test             # Vitest
 
-- `npm run dev` - Start Vite dev server
-- `npm run build` - Build for production
-- `npm run lint` - Run ESLint
-- `npm run start` - Start Express server
-- `npm run preview` - Preview production build
+# Backend
+cd backend
+npm run dev          # nodemon
+npm run seed         # seed MongoDB from db/data_tvet_muktamad.json
+npm test             # Jest + Supertest (cross-env NODE_ENV=test)
 
-## Environment Variables
+# ML
+cd ML
+uvicorn ml:app --port 8000
+pytest test_ml.py
+```
 
-- `PORT` - Server port (default: 5000)
-- `MONGO_URI` - MongoDB connection string
-- `JWT_SECRET` - JWT signing secret
+## Conventions you MUST follow
+- **Database field names are Malay** (`ID_Pelajar`, `Nama`, `Kursus`, `Kehadiran_Pct`,
+  `CGPA`, `Sijil_Profesional`, `PLO_1`..`PLO_9`). They are stored as **strings** in
+  MongoDB and parsed to numbers at read time (`backend/item.model.js` → `normaliseStudent`).
+- **API responses** use normalized English-ish keys (`id`, `nama`, `kursus`, `attendance`,
+  `cgpa`, `plo1`..`plo9`, `dropoutRisk`). Keep this mapping consistent.
+- **Risk mapping**: `Bermasalah→Tinggi`, `Sederhana→Sederhana`, `Cemerlang→Rendah`.
+  Overrides: `attendance<80 || cgpa<2.0 → Tinggi`; `cgpa>=3.5 → Rendah`.
+- **UI text must be in Bahasa Melayu.** Keep user-facing strings in BM.
+- Backend routes live under `/api` and are guarded by `verifyToken` (JWT Bearer).
+
+## Data / ETL gotchas
+- The MDB student master table is **lowercase `pelajar`** (NOT `Pelajar`). `mdb-export`
+  is case-sensitive. Other tables: `GPA`, `Daftar_Subjek`, `Detail_Result`, `Anugerah`,
+  `Pelajar_Koko_Detail`, `Layak_Sijil`.
+- Student addresses contain **embedded commas and newlines**. Always parse MDB exports
+  with a real CSV parser (`csv.DictReader` / pandas), never line-splitting.
+- `ML/ml.py` `process_mdb_data()` keys students off the `GPA` table first; a student must
+  have at least one GPA record to appear in the output.
+- The trained model is **`model_ai_risiko_lengkap_v3.pkl`** (v3). Do not switch to v2 or
+  `model_ai_tvet_besut.pkl` without updating `MODEL_PATH`.
+- The ML feature set must exactly match training columns:
+  `CGPA, Avg_Subjek_Attendance, PLO_1..PLO_9, PLO_Avg, PLO_Variance`.
+
+## Security rules (do NOT violate)
+- **Never commit `backend/.env`** — it contains a real `JWT_SECRET`. It is gitignored.
+- The legacy `backend/db/login_users.json` (plaintext passwords) has been **deleted**.
+  Do not reintroduce plaintext credentials. Auth uses **bcrypt** via `backend/auth.model.js`.
+- Student passwords reset to `password123` on every MDB sync (upsert `$set`). Be aware
+  before changing this behavior.
+
+## Known pitfalls / tech debt
+- `GET /api/auth/users` is currently **unprotected** (returns emails/roles). Consider
+  protecting it if you touch auth.
+- `GET /students` returns the full collection to any logged-in user; the student
+  dashboard filters client-side. Data-exposure risk — tighten if you add role checks.
+- `StudentModal.jsx` course dropdown **omits `SED`** (exists in data). Add it if you edit
+  that component.
+- Employability % in the UI is a fixed heuristic `(CGPA/4)*40 + attendance*0.6`;
+  StaffDashboard "Top Performers" uses a different formula `(CGPA/4)*60 + attendance*0.4`.
+- `sedut_mdb_tulen.py` and `inspect_mdb_linux.py` now live in `backend/db/` and resolve
+  the MDB path via `os.path.dirname(__file__)`. Keep that pattern.
+- Compose `start:prod` does **not** auto-seed. Seed via MDB upload in the UI or
+  `npm run seed`.
+
+## Testing expectations
+Any change to auth, student CRUD, or the ML contract should keep these green:
+- Frontend: `src/__tests__/Login.test.jsx`
+- Backend: `backend/__tests__/auth.test.js`, `backend/__tests__/items.test.js`
+- ML: `ML/test_ml.py`

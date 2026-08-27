@@ -8,3 +8,4 @@ numpy
 httpx
 pytest
 pytest-asyncio
+python-multipart
