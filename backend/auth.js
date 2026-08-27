@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateUser, getPublicLoginUsers } from './auth.model.js';
+import { verifyToken } from './middleware/authMiddleware.js';
 
 const router = Router();
 
@@ -14,7 +15,10 @@ const router = Router();
  *       200:
  *         description: A list of users.
  */
-router.get('/users', async (_req, res) => {
+router.get('/users', verifyToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Akses ditolak. Admin sahaja.' });
+  }
   try {
     const users = await getPublicLoginUsers();
     res.json(users);

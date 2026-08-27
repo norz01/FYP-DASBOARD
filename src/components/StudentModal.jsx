@@ -94,6 +94,7 @@ export default function StudentModal({
               <option value="PPU">PPU - Penyamanan Udara</option>
               <option value="SLR">SLR - Lukisan Mekanikal</option>
               <option value="DCG">DCG - Elektrik (PW4)</option>
+              <option value="SED">Sijil Elektrik Domestik</option>
             </select>
           </div>
           <div className="flex flex-col gap-1 col-span-2">
