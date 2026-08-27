@@ -1,12 +1,15 @@
+import { jest } from '@jest/globals';
 import request from 'supertest';
-import app from '../server.js';
-import { authenticateUser } from '../auth.model.js';
 
-// Mock the auth.model.js functions
-jest.mock('../auth.model.js', () => ({
+// 1. Setup the ESM mock FIRST
+jest.unstable_mockModule('../auth.model.js', () => ({
   authenticateUser: jest.fn(),
   getPublicLoginUsers: jest.fn()
 }));
+
+// 2. Dynamically import the app and mocked module AFTER the mock is declared
+const { default: app } = await import('../server.js');
+const { authenticateUser } = await import('../auth.model.js');
 
 describe('Auth API Endpoints', () => {
   beforeEach(() => {
