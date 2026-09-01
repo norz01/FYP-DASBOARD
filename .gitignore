@@ -13,6 +13,9 @@ mongodb_data/
 db/data_tvet_muktamad.json
 db/data_tvet.json
 db/Ekspot_Senat.mdb
+db/JD2025.mdb
+db/JJ2025.mdb
+db/JJ2026.mdb
 
 # Log files
 server.log

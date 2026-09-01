@@ -22,9 +22,10 @@ function normaliseStudent(record) {
 
   if (attendance < 80 || cgpa < 2.0) {
     assignedRisk = "Tinggi";
-  } else if (cgpa >= 3.5) {
-    assignedRisk = "Rendah";
-  } else if (record.Status_Pelajar === "Cemerlang") {
+  } else if (record.Status_Pelajar === "Bermasalah") {
+    // AI-flagged at-risk students stay Tinggi even if CGPA >= 3.5
+    assignedRisk = "Tinggi";
+  } else if (cgpa >= 3.5 || record.Status_Pelajar === "Cemerlang") {
     assignedRisk = "Rendah";
   }
 

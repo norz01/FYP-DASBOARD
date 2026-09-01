@@ -1,7 +1,7 @@
 # TVETMARA Besut Skills & Talent Development Dashboard — Complete Project Summary
 
 > Read top to bottom. Each section explains one layer of the system. No prior knowledge needed.
-> Verified against source code on 2026-08-27.
+> Verified against source code on 2026-09-01.
 
 ---
 
@@ -34,10 +34,10 @@ Four services, orchestrated by Docker/Podman Compose (`compose.yml`) on one brid
 │ + Nginx   │ <───────────────────── │ :5000    │ <──────────── │  (Python) │
 │ :8080→80  │                        └────┬─────┘               └───────────┘
 └───────────┘                             │ Mongoose ODM
-                                    ┌─────▼──────┐
-                                    │  MongoDB   │  DB name: ikmb-dashboard
-                                    │  :27017    │  volume: ./mongodb_data
-                                    └────────────┘
+                                     ┌─────▼──────┐
+                                     │  MongoDB   │  DB name: ikmb-dashboard
+                                     │  :27017    │  volume: ./mongodb_data
+                                     └────────────┘
 ```
 
 | Service | Tech stack | Port | Role |
@@ -81,6 +81,7 @@ Four services, orchestrated by Docker/Podman Compose (`compose.yml`) on one brid
 │   ├── models/Student.js         # Mongoose student schema
 │   ├── models/User.js            # Mongoose user schema
 │   ├── seed.js                   # DB seeder (upsert from JSON)
+│   ├── seed-admin.js             # legacy admin seeder
 │   ├── .env / .env.example       # PORT, MONGO_URI, JWT_SECRET
 │   ├── Containerfile.backend     # node:20-alpine image
 │   ├── babel.config.json         # for Jest ESM transforms
@@ -154,7 +155,7 @@ Employability formula (client-side heuristic, repeated in several places): `min(
 
 **`StudentDashboard.jsx`** (student) — 4 tabs. If logged-in user has `role=user` + `studentId`, list is filtered to only that student (`isRestrictedUser`).
 1. **Profil & Prestasi** — greeting with displayName, risk badge (Tinggi red / Sederhana yellow / else green "Good Standing"), 3 stat cards (employability %, attendance %, latest CGPA), **radar chart** of own 9 PLO scores vs 80% target (data from `/students/:id/skill-gap` which includes live AI prediction), yellow "CADANGAN AI" insight box, dark card with top-2 career previews per course.
-2. **Kemaskini Sijil Saya** — upload profile image (POST `students/:id/profile-image`), add certificate: name + issuer + file PDF/PNG/JPG ≤5MB (POST `students/:id/certificates`), grid list of own certificates with delete (DELETE `students/:id/certificates/:certId`). Certificates open in new tab via `/uploads/...` URL.
+2. **Kemaskuni Sijil Saya** — upload profile image (POST `students/:id/profile-image`), add certificate: name + issuer + file PDF/PNG/JPG ≤5MB (POST `students/:id/certificates`), grid list of own certificates with delete (DELETE `students/:id/certificates/:certId`). Certificates open in new tab via `/uploads/...` URL.
 3. **Padanan Kerjaya (AI)** — `JobCard` grid from hardcoded `careerMapping` keyed by course code (ITW/DFK/DGA/SLR/DCG/SED/PPU), 2 jobs each (e.g. DFK → Cloud Engineer @ AWS Malaysia 94%, DevOps Engineer @ Maxis 85%).
 4. **Kursus Cadangan** — recommended course card based on weakest PLO from insight (hardcoded `courseMappings` per PLO), plus static "AWS Cloud Practitioner Essentials" promo card.
 
@@ -205,7 +206,7 @@ Employability formula (client-side heuristic, repeated in several places): `min(
   - `bcrypt.compare(password, hashed)`;
   - on match signs **JWT (8h expiry)** with `process.env.JWT_SECRET`, payload `{email, role, studentId}`;
   - returns `{message, user: sanitized (no password), token}`. Wrong credentials → 401, missing fields → 400.
-- `GET /api/auth/users` — **public (unprotected)** sanitized user list.
+- `GET /api/auth/users` — **protected (admin only)** sanitized user list.
 - `verifyToken` middleware — expects `Authorization: Bearer <jwt>`; missing header → 403, invalid/expired → 401; attaches decoded payload to `req.user` (used for role + studentId checks).
 
 ### 5.3 Student/Data/Predict Routes — `items.js` (all behind `verifyToken`)
@@ -378,7 +379,7 @@ Run commands:
 - `backend/db/login_users.json` contains **plaintext passwords** — legacy artifact, unused by current auth.
 - `backend/db/data_tvet_muktamad.json` is `[]` (empty array) locally — DB populated via MDB upload in UI or by fixing path in `sedut_mdb_tulen.py` (its hardcoded `DB_PATH` points to old root `db/` folder, not `backend/db/`).
 - Student login **passwords reset to `password123` on every MDB sync** (upsert `$set` includes password).
-- `GET /api/auth/users` is **unprotected** — leaks emails/roles/studentIds (no passwords).
+- `GET /api/auth/users` is **protected (admin only)** — returns sanitized user list.
 - `StudentModal` course dropdown omits **SED** (exists in data).
 - `src/App.css` is dead Vite template CSS.
 - Employability % shown in UI is a fixed heuristic, independent of AI model output. (StaffDashboard "Top Performers" score uses yet another formula: `(cgpa/4)*60 + attendance*0.4`.)
@@ -391,4 +392,6 @@ Run commands:
 
 ---
 
-Last modified: 2026-08-27 15:30:00
+Last modified: 2026-09-01 10:45:00
+
+(End of file - total 400+ lines)

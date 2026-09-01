@@ -442,7 +442,9 @@ export default function StaffDashboard() {
                           <p className="text-xs text-red-500 font-bold">
                             {Number(s.attendance) < 80
                               ? "⚠️ Kehadiran: " + s.attendance + "%"
-                              : "📉 CGPA: " + s.cgpa}
+                              : Number(s.cgpa) < 2.0
+                                ? "📉 CGPA: " + s.cgpa
+                                : "🤖 AI: Risiko Tinggi"}
                           </p>
                         </div>
                         <i className="ph ph-caret-right text-red-400"></i>

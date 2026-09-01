@@ -1,3 +1,4 @@
+from typing import List
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 import joblib
@@ -10,13 +11,13 @@ import subprocess
 import tempfile
 import io
 
-app = FastAPI(title="TVETMARA AI Prediction API V3")
+app = FastAPI(title="TVETMARA AI Prediction API V4")
 
-MODEL_PATH = "model_ai_risiko_lengkap_v3.pkl"
+MODEL_PATH = "model_ai_risiko_lengkap_v4.pkl"
 
 try:
     risk_model = joblib.load(MODEL_PATH)
-    print("✅ AI Model V3 Loaded Successfully!")
+    print("✅ AI Model V4 Loaded Successfully!")
 except Exception as e:
     print(f"❌ Error loading model: {e}")
     risk_model = None
@@ -37,7 +38,7 @@ class StudentFeatures(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"status": "AI Server V3 is running"}
+    return {"status": "AI Server V4 is running"}
 
 @app.post("/predict/risk")
 def predict_risk(data: StudentFeatures):
@@ -78,6 +79,45 @@ def predict_risk(data: StudentFeatures):
     except Exception as e:
         print(f"❌ EXACT ML ERROR: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Prediction error: {str(e)}")
+
+
+class BatchPredictRequest(BaseModel):
+    students: List[StudentFeatures]
+
+
+@app.post("/predict/batch")
+def predict_batch(payload: BatchPredictRequest):
+    if risk_model is None:
+        raise HTTPException(status_code=500, detail="AI Model is not loaded")
+
+    try:
+        rows = []
+        for s in payload.students:
+            plo_values = [s.PLO_1, s.PLO_2, s.PLO_3, s.PLO_4, s.PLO_5,
+                          s.PLO_6, s.PLO_7, s.PLO_8, s.PLO_9]
+
+            rows.append({
+                "CGPA": s.CGPA,
+                "Avg_Subjek_Attendance": s.Attendance,
+                "PLO_1": s.PLO_1, "PLO_2": s.PLO_2, "PLO_3": s.PLO_3,
+                "PLO_4": s.PLO_4, "PLO_5": s.PLO_5, "PLO_6": s.PLO_6,
+                "PLO_7": s.PLO_7, "PLO_8": s.PLO_8, "PLO_9": s.PLO_9,
+                "PLO_Avg": float(np.mean(plo_values)),
+                "PLO_Variance": float(np.var(plo_values)),
+            })
+
+        features = pd.DataFrame(rows)
+
+        if hasattr(risk_model, 'feature_names_in_'):
+            features = features[risk_model.feature_names_in_]
+
+        predictions = risk_model.predict(features)
+
+        return {"success": True, "predictions": [str(p) for p in predictions]}
+
+    except Exception as e:
+        print(f"❌ BATCH ML ERROR: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Batch prediction error: {str(e)}")
 
 
 # ============================================================
@@ -166,7 +206,8 @@ def process_mdb_data(db_path):
         no = row.get('No_Pelajar')
         if no in students:
             students[no]['Nama'] = row.get('Nama_Pelajar', 'Tiada Nama')
-            students[no]['Kursus'] = row.get('Kod_Kursus_Pelajar', 'Tiada Kursus')
+            raw_kursus = row.get('Kod_Kursus_Pelajar', 'Tiada Kursus') or 'Tiada Kursus'
+            students[no]['Kursus'] = raw_kursus.strip().replace('*', '').strip()
             students[no]['No_KP'] = row.get('NoKP_Pelajar', '')
             students[no]['No_Telefon'] = row.get('No_Telefon', '')
             
@@ -215,9 +256,21 @@ def process_mdb_data(db_path):
     # 4. PLO Scores
     detail_data = get_table_data(db_path, 'Detail_Result')
     print(f"📈 Jumlah baris dalam jadual Detail_Result: {len(detail_data)}")
+
+    # 4a. AUTO-EXCLUSION: subjects whose Kod_Ujian references LO > 9 use an
+    # internal CLO numbering scheme (NOT the 9 programme PLOs).
+    # Example: DUA20102 has LO11 -> its LO7/LO8 must NOT count as PLO 7/8.
+    excluded_subjects = set()
+    for row in detail_data:
+        m = re.search(r'LO(\d+)', row.get('Kod_Ujian', ''))
+        if m and int(m.group(1)) > 9:
+            excluded_subjects.add(row.get('Kod_Subjek', ''))
+    if excluded_subjects:
+        print(f"⚠️ Subjek dikecualikan daripada pemetaan PLO (skema CLO dalaman): {sorted(excluded_subjects)}")
+
     for row in detail_data:
         no = row.get('No_Pelajar')
-        if no in students:
+        if no in students and row.get('Kod_Subjek', '') not in excluded_subjects:
             match = re.search(r'LO(\d+)', row.get('Kod_Ujian', ''))
             if match:
                 idx = int(match.group(1))

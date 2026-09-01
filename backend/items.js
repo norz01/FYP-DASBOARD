@@ -297,6 +297,46 @@ router.post("/data/upload-mdb", verifyToken, mdbUpload.single("file"), async (re
 
     const { data: students } = await mlResponse.json();
 
+    // 🤖 NEW: AI batch prediction — Status_Pelajar no longer stays 'Pending AI'
+    if (students.length > 0) {
+      try {
+        const batchPayload = students.map((s) => ({
+          CGPA: parseFloat(s.CGPA) || 0,
+          Attendance: parseFloat(s.Kehadiran_Pct) || 0,
+          PLO_1: parseFloat(s.PLO_1) || 0,
+          PLO_2: parseFloat(s.PLO_2) || 0,
+          PLO_3: parseFloat(s.PLO_3) || 0,
+          PLO_4: parseFloat(s.PLO_4) || 0,
+          PLO_5: parseFloat(s.PLO_5) || 0,
+          PLO_6: parseFloat(s.PLO_6) || 0,
+          PLO_7: parseFloat(s.PLO_7) || 0,
+          PLO_8: parseFloat(s.PLO_8) || 0,
+          PLO_9: parseFloat(s.PLO_9) || 0,
+          Sijil: s.Sijil_Profesional || "Tiada",
+        }));
+
+        const batchResponse = await fetch(`${mlApiUrl}/predict/batch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ students: batchPayload }),
+        });
+
+        if (batchResponse.ok) {
+          const batchData = await batchResponse.json();
+          if (Array.isArray(batchData.predictions) && batchData.predictions.length === students.length) {
+            students.forEach((s, i) => {
+              s.Status_Pelajar = batchData.predictions[i];
+            });
+            console.log(`🤖 AI batch prediction saved for ${students.length} students.`);
+          }
+        } else {
+          console.warn("⚠️ AI batch prediction failed — keeping ETL status.");
+        }
+      } catch (aiError) {
+        console.warn("⚠️ AI service unreachable:", aiError.message);
+      }
+    }
+
     // LANGKAH BAHARU: Sync Data (Padam pelajar lama yang tiada dalam fail baharu)
     if (students.length > 0) {
       const newStudentIds = students.map(s => s.ID_Pelajar);

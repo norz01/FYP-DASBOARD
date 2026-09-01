@@ -26,16 +26,24 @@ features = ['CGPA', 'Avg_Subjek_Attendance'] + plo_cols + ['PLO_Avg', 'PLO_Varia
 X = df[features]
 y = df['Status_Pelajar']
 
-# Stratify helps split the 5 Cemerlang and 27 Bermasalah evenly
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+print("\n📊 Label Distribution:")
+print(y.value_counts())
+
+# Safeguard: Stratify requires at least 2 samples per class in the test set.
+# If strict rules leave only 1 "Cemerlang" student, we disable stratify to prevent crashes.
+if y.value_counts().min() < 2:
+    print("\n⚠️ Warning: A class has < 2 samples. Disabling stratification to prevent split errors.")
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+else:
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
 # 5. Hyperparameter Tuning
-print("🔧 Starting Hyperparameter Tuning on Real Data...")
+print("\n🔧 Starting Hyperparameter Tuning on Real Data...")
 param_grid = {
     'n_estimators': [100, 200, 300],
     'max_depth': [None, 10, 20],
     'min_samples_split': [2, 5, 10],
-    'class_weight': ['balanced', None] 
+    'class_weight': ['balanced', None] # 'balanced' is crucial here due to class imbalance
 }
 
 rf = RandomForestClassifier(random_state=42)
@@ -56,7 +64,7 @@ print(classification_report(y_test, y_pred, zero_division=0))
 print("Confusion Matrix:")
 print(confusion_matrix(y_test, y_pred))
 
-# 7. Save the v3 Model
-MODEL_V3_PATH = 'model_ai_risiko_lengkap_v3.pkl'
-joblib.dump(best_model, MODEL_V3_PATH)
-print(f"\n🚀 Saved improved real-data model as {MODEL_V3_PATH}")
+# 7. Save the v4 Model
+MODEL_V4_PATH = 'model_ai_risiko_lengkap_v4.pkl'
+joblib.dump(best_model, MODEL_V4_PATH)
+print(f"\n🚀 Saved improved real-data model as {MODEL_V4_PATH}")
