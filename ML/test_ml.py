@@ -7,7 +7,7 @@ client = TestClient(app)
 def test_health_check():
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json()["status"] == "AI Server V3 is running"
+    assert response.json()["status"] == "AI Server V4 is running"
 
 def test_predict_risk_valid_data():
     payload = {
