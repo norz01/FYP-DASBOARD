@@ -56,34 +56,36 @@ export default function LoginForm() {
           </div>
 
           <form action={formAction} className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-700">Emel Pengguna</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <i className="ph ph-envelope text-slate-400 text-lg"></i>
-                </div>
-                <input
-                  type="email" name="email" required defaultValue="admin@ikmb.edu.my"
-                  className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                />
-              </div>
-            </div>
+<div className="space-y-2">
+               <label htmlFor="email" className="text-sm font-semibold text-slate-700">Emel Pengguna</label>
+               <div className="relative">
+                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                   <i className="ph ph-envelope text-slate-400 text-lg"></i>
+                 </div>
+                 <input 
+                   id="email"
+                   type="email" name="email" required defaultValue="admin@ikmb.edu.my"
+                   className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                 />
+               </div>
+             </div>
 
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <label className="text-sm font-semibold text-slate-700">Kata Laluan</label>
-                <a href="#" className="text-sm text-blue-600 hover:text-blue-700 font-medium">Lupa kata laluan?</a>
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <i className="ph ph-lock-key text-slate-400 text-lg"></i>
-                </div>
-                <input
-                  type="password" name="password" required defaultValue="password123"
-                  className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
-                />
-              </div>
-            </div>
+<div className="space-y-2">
+               <div className="flex justify-between">
+                 <label htmlFor="password" className="text-sm font-semibold text-slate-700">Kata Laluan</label>
+                 <a href="#" className="text-sm text-blue-600 hover:text-blue-700 font-medium">Lupa kata laluan?</a>
+               </div>
+               <div className="relative">
+                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                   <i className="ph ph-lock-key text-slate-400 text-lg"></i>
+                 </div>
+                 <input 
+                   id="password"
+                   type="password" name="password" required defaultValue="password123"
+                   className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                 />
+               </div>
+             </div>
 
             <SubmitButton />
 
