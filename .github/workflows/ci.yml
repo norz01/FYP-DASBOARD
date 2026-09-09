@@ -7,7 +7,7 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  # --- 1. FRONTEND TEST & BUILD ---
+  # --- 1. FRONTEND TEST & BUILD (Next.js 15 SSR) ---
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -18,14 +18,19 @@ jobs:
           node-version: '20'
       - name: Install Dependencies
         run: npm install
-      - name: Run Frontend Tests
+      - name: Run Frontend Tests (Vitest)
         run: npm test
-      - name: Build Frontend
+      - name: Build Frontend (Next.js SSR)
+        env:
+          BACKEND_URL: http://backend:5000
         run: npm run build
 
-  # --- 2. BACKEND TEST ---
+  # --- 2. BACKEND TEST (Express + Jest) ---
   backend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
@@ -33,29 +38,30 @@ jobs:
         with:
           node-version: '20'
       - name: Install Dependencies
-        run: cd backend && npm install
-      - name: Run Backend Tests
-        run: cd backend && npm test
+        run: npm install
+      - name: Run Backend Tests (Jest + Supertest)
+        run: npm test
 
-  # --- 3. ML SERVICE TEST ---
+  # --- 3. ML SERVICE TEST (FastAPI + Pytest) ---
   ml-service:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ML
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+      - name: Install mdbtools (ETL dependency)
+        run: sudo apt-get update && sudo apt-get install -y mdbtools
       - name: Install Dependencies
-        run: |
-          cd ML
-          pip install -r requirements.txt
-      - name: Run ML Tests
-        run: |
-          cd ML
-          pytest test_ml.py
+        run: pip install -r requirements.txt
+      - name: Run ML Tests (Pytest)
+        run: pytest test_ml.py
 
-  # --- 4. DOCKER BUILD (Only if tests pass) ---
+  # --- 4. DOCKER BUILD (Only if all tests pass) ---
   docker-build:
     needs: [frontend, backend, ml-service]
     runs-on: ubuntu-latest
