@@ -20,14 +20,13 @@ services:
     ports:
       - "5000:5000"
     env_file:
-      - ./backend/.env # 👈 Loads PORT and JWT_SECRET securely
+      - ./backend/.env
     environment:
-      # Override DB and ML URLs for the internal Docker network
       - MONGO_URI=mongodb://mongodb:27017/ikmb-dashboard
       - ML_API_URL=http://ml-api:8000
     depends_on:
       - mongodb
-    command: sh -c "sleep 5 && npm run start:prod" # 👈 AUTOMATIC SEED ON STARTUP
+    command: sh -c "sleep 5 && npm run start:prod"
     restart: always
     networks:
       - tvet_net
@@ -49,7 +48,10 @@ services:
       dockerfile: Containerfile.frontend
     container_name: tvet_frontend
     ports:
-      - "8080:80"
+      - "8080:3000" # Maps host 8080 to Next.js internal 3000
+    environment:
+      - BACKEND_URL=http://backend:5000 # Allows Server Components to fetch data
+      - NODE_ENV=production
     depends_on:
       - backend
     restart: always

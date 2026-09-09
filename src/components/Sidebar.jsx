@@ -1,4 +1,6 @@
+"use client";
 import React from "react";
+import Image from "next/image";
 
 export default function Sidebar({
   navItems,
@@ -23,10 +25,14 @@ export default function Sidebar({
       className={`fixed inset-y-0 left-0 z-30 w-64 bg-white border-r border-slate-200 flex flex-col transform ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"} transition-transform duration-300 md:relative md:translate-x-0 shadow-2xl md:shadow-none`}
     >
       <div className="p-6 flex items-center justify-between border-b border-slate-100">
-        <img
-          src="/logo-tvetmara.jpg"
-          alt="TVETMARA"
-          className="w-48 h-auto object-contain"
+        {/* NEXT.JS IMAGE OPTIMIZATION */}
+        <Image 
+          src="/logo-tvetmara.jpg" 
+          alt="TVETMARA" 
+          width={192} // Anggaran width untuk w-48
+          height={48} 
+          className="w-48 h-auto object-contain" 
+          priority 
         />
         <button
           onClick={() => setIsSidebarOpen(false)}

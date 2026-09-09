@@ -1,3 +1,4 @@
+"use client";
 import React, { useState, useMemo } from "react";
 
 const courseMap = {
@@ -99,21 +100,17 @@ export default function StudentListGrid({
               onClick={() => onViewProfile(student.id)}
               className="relative bg-white border border-[rgba(18,81,170,0.13)] rounded-xl overflow-hidden cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all duration-300"
             >
-              {/* Banner Header */}
               <div className="h-20 bg-[#0C2461] flex justify-end items-start p-3 relative">
-                {/* Replaced Status Badge with Semester Badge */}
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-white/15 text-white backdrop-blur-sm border border-white/20 shadow-sm">
                   <i className="ph-fill ph-graduation-cap text-sm"></i> Sem{" "}
                   {student.semester || "1"}
                 </span>
               </div>
 
-              {/* Absolutely Positioned Avatar (Guarantees no clipping) */}
               <div className="absolute top-8 left-1/2 -translate-x-1/2 w-24 h-24 rounded-full bg-[#1251AA] text-white text-3xl font-bold flex items-center justify-center border-4 border-white shadow-md z-10">
                 {student.nama?.charAt(0)}
               </div>
 
-              {/* Content Wrapper (Padded top to make room for the absolute avatar) */}
               <div className="pt-14 pb-5 px-5 flex flex-col items-center text-center">
                 <h3 className="font-bold text-[#0A1628] truncate w-full">
                   {student.nama}

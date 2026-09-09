@@ -1,0 +1,38 @@
+{
+  "node": {
+    "00014295751caf2e46ab825669b902a3a7338fbb1f": {
+      "workers": {
+        "app/page": {
+          "moduleId": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fhome%2Fnorz%2Fprojek%2Ffyp%2FTVETMARA-Besut-Skills-Talent-Development-Dashboard%2Fsrc%2Fapp%2Factions.js%22%2C%5B%5B%2200014295751caf2e46ab825669b902a3a7338fbb1f%22%2C%22logoutAction%22%5D%2C%5B%2260d24a03c43bbe2bb98963a52bf3cdd95e37d8f793%22%2C%22loginAction%22%5D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/staff-dashboard/page": {
+          "moduleId": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fhome%2Fnorz%2Fprojek%2Ffyp%2FTVETMARA-Besut-Skills-Talent-Development-Dashboard%2Fsrc%2Fapp%2Factions.js%22%2C%5B%5B%2200014295751caf2e46ab825669b902a3a7338fbb1f%22%2C%22logoutAction%22%5D%2C%5B%2260d24a03c43bbe2bb98963a52bf3cdd95e37d8f793%22%2C%22loginAction%22%5D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/page": "action-browser",
+        "app/staff-dashboard/page": "action-browser"
+      }
+    },
+    "60d24a03c43bbe2bb98963a52bf3cdd95e37d8f793": {
+      "workers": {
+        "app/page": {
+          "moduleId": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fhome%2Fnorz%2Fprojek%2Ffyp%2FTVETMARA-Besut-Skills-Talent-Development-Dashboard%2Fsrc%2Fapp%2Factions.js%22%2C%5B%5B%2200014295751caf2e46ab825669b902a3a7338fbb1f%22%2C%22logoutAction%22%5D%2C%5B%2260d24a03c43bbe2bb98963a52bf3cdd95e37d8f793%22%2C%22loginAction%22%5D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        },
+        "app/staff-dashboard/page": {
+          "moduleId": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22%2Fhome%2Fnorz%2Fprojek%2Ffyp%2FTVETMARA-Besut-Skills-Talent-Development-Dashboard%2Fsrc%2Fapp%2Factions.js%22%2C%5B%5B%2200014295751caf2e46ab825669b902a3a7338fbb1f%22%2C%22logoutAction%22%5D%2C%5B%2260d24a03c43bbe2bb98963a52bf3cdd95e37d8f793%22%2C%22loginAction%22%5D%5D%5D%5D&__client_imported__=true!",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/page": "action-browser",
+        "app/staff-dashboard/page": "action-browser"
+      }
+    }
+  },
+  "edge": {},
+  "encryptionKey": "yANQxHF68YDkY+NsUh5Kk0fk7LTQc7UTOEawYT942uU="
+}
