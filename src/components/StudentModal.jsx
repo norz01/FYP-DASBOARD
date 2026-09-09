@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useEffect, useRef } from "react";
 
 export default function StudentModal({
   isOpen,
@@ -9,11 +9,37 @@ export default function StudentModal({
   handleInputChange,
   handleSubmit,
 }) {
+  const modalRef = useRef(null);
+
+  // 🐛 FIX 1: Close modal when the 'Escape' key is pressed
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    
+    if (isOpen) {
+      document.addEventListener("keydown", handleEscape);
+    }
+    
+    // Cleanup event listener when modal closes or component unmounts
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [isOpen, onClose]);
+
+  // 🐛 FIX 2: Close modal when clicking the darkened backdrop (outside the modal content)
+  const handleBackdropClick = (e) => {
+    if (modalRef.current && !modalRef.current.contains(e.target)) {
+      onClose();
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-[100] flex justify-center items-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-8">
+    <div 
+      className="fixed inset-0 bg-black/60 z-[100] flex justify-center items-center p-4"
+      onClick={handleBackdropClick}
+    >
+      <div ref={modalRef} className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-8 relative">
         <h3 className="text-xl font-bold mb-4">
           {editingStudent ? "Kemaskini Pelajar" : "Tambah Pelajar Baharu"}
         </h3>

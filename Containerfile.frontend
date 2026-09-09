@@ -13,8 +13,8 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
-# CRITICAL: rewrites are frozen at build time — bake the Docker DNS name
-ENV BACKEND_URL=http://backend:5000
+# REMOVED: ENV BACKEND_URL=http://backend:5000
+# Next.js will now read process.env.BACKEND_URL dynamically at runtime from docker-compose.yml
 
 RUN npm run build
 

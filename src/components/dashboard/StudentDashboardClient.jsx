@@ -15,6 +15,7 @@ import {
 import { Radar } from "react-chartjs-2";
 import Sidebar from "../Sidebar";
 import JobCard from "../JobCard";
+import { calculateEmployability } from "@/lib/heuristics";
 
 ChartJS.register(
   RadialLinearScale,
@@ -507,18 +508,12 @@ export default function StudentDashboardClient() {
                   <p className="text-sm text-slate-500 mb-1">
                     Ramalan Kebolehpasaran
                   </p>
-                  <h2 className="text-3xl font-bold text-slate-900">
-                    {skillGap.student
-                      ? Math.min(
-                          100,
-                          Math.round(
-                            (skillGap.student.cgpa / 4) * 40 +
-                              skillGap.student.attendance * 0.6,
-                          ),
-                        )
-                      : 0}
-                    %
-                  </h2>
+<h2 className="text-3xl font-bold text-slate-900">
+                     {skillGap.student
+                       ? calculateEmployability(skillGap.student.cgpa, skillGap.student.attendance)
+                       : 0}
+                     %
+                   </h2>
                 </div>
                 <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                   <p className="text-sm text-slate-500 mb-1">

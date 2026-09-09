@@ -14,7 +14,7 @@ import {
   deleteStudent,
   getRealAIPrediction,
 } from "./item.model.js";
-import { verifyToken } from "./middleware/authMiddleware.js";
+import { verifyToken, requireAdmin, requireOwnershipOrAdmin } from "./middleware/authMiddleware.js";
 
 const router = Router();
 
@@ -49,7 +49,6 @@ const upload = multer({
   },
 });
 
-// Multer untuk fail .mdb — simpan dalam memori, hantar terus ke ML service
 const mdbUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 },
@@ -61,16 +60,21 @@ const mdbUpload = multer({
   },
 });
 
-/**
- * @swagger
- * tags:
- *   name: Students
- *   description: Student management and analytics API
- */
+// ==========================================
+// STUDENT ROUTES (SECURED & REFACTORED)
+// ==========================================
 
-// Dapatkan semua pelajar
-router.get("/students", verifyToken, async (_req, res) => {
+// Dapatkan semua pelajar (Data Exposure Fix)
+router.get("/students", verifyToken, async (req, res) => {
   try {
+    // If the user is a student, only return their own data from the DB
+    if (req.user.role === "user" && req.user.studentId) {
+      const student = await getStudentById(req.user.studentId);
+      if (!student) return res.json([]); 
+      return res.json([student]); // Wrap in array to match frontend expectations
+    }
+
+    // Admin gets all students
     const students = await getAllStudents();
     res.json(students);
   } catch (error) {
@@ -79,9 +83,7 @@ router.get("/students", verifyToken, async (_req, res) => {
 });
 
 // Tambah pelajar baharu
-router.post("/students", verifyToken, async (req, res) => {
-  if (req.user.role !== "admin")
-    return res.status(403).json({ message: "Unauthorized" });
+router.post("/students", verifyToken, requireAdmin, async (req, res) => {
   try {
     const student = await createStudent(req.body);
     res.status(201).json(student);
@@ -91,9 +93,7 @@ router.post("/students", verifyToken, async (req, res) => {
 });
 
 // Kemaskini pelajar
-router.put("/students/:studentId", verifyToken, async (req, res) => {
-  if (req.user.role !== "admin")
-    return res.status(403).json({ message: "Unauthorized" });
+router.put("/students/:studentId", verifyToken, requireAdmin, async (req, res) => {
   try {
     const updated = await updateStudent(req.params.studentId, req.body);
     if (!updated) return res.status(404).json({ message: "Student not found" });
@@ -104,9 +104,7 @@ router.put("/students/:studentId", verifyToken, async (req, res) => {
 });
 
 // Padam pelajar
-router.delete("/students/:studentId", verifyToken, async (req, res) => {
-  if (req.user.role !== "admin")
-    return res.status(403).json({ message: "Unauthorized" });
+router.delete("/students/:studentId", verifyToken, requireAdmin, async (req, res) => {
   try {
     const deleted = await deleteStudent(req.params.studentId);
     if (!deleted) return res.status(404).json({ message: "Student not found" });
@@ -116,8 +114,8 @@ router.delete("/students/:studentId", verifyToken, async (req, res) => {
   }
 });
 
-// Dapatkan pelajar mengikut ID
-router.get("/students/:studentId", verifyToken, async (req, res) => {
+// Dapatkan pelajar mengikut ID (Secured with Ownership Check)
+router.get("/students/:studentId", verifyToken, requireOwnershipOrAdmin, async (req, res) => {
   try {
     const student = await getStudentById(req.params.studentId);
     if (!student) return res.status(404).json({ message: "Student not found" });
@@ -127,8 +125,8 @@ router.get("/students/:studentId", verifyToken, async (req, res) => {
   }
 });
 
-// Dapatkan analisis jurang skill
-router.get("/students/:studentId/skill-gap", verifyToken, async (req, res) => {
+// Dapatkan analisis jurang skill (Secured with Ownership Check)
+router.get("/students/:studentId/skill-gap", verifyToken, requireOwnershipOrAdmin, async (req, res) => {
   try {
     const skillGap = await getStudentSkillGapById(req.params.studentId);
     if (!skillGap)
@@ -141,22 +139,16 @@ router.get("/students/:studentId/skill-gap", verifyToken, async (req, res) => {
   }
 });
 
-// ENDPOINT BAHARU: Muat naik sijil pelajar
+// Muat naik sijil pelajar (Secured: Middleware runs BEFORE multer to prevent disk writes)
 router.post(
   "/students/:studentId/certificates",
   verifyToken,
+  requireOwnershipOrAdmin,
   upload.single("file"),
   async (req, res) => {
     try {
       const { studentId } = req.params;
       const { name, issuer } = req.body;
-
-      if (req.user.role !== "admin" && req.user.studentId !== studentId) {
-        if (req.file) fs.unlinkSync(req.file.path);
-        return res
-          .status(403)
-          .json({ message: "Unauthorized to upload for this student" });
-      }
 
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
@@ -191,17 +183,14 @@ router.post(
   },
 );
 
-// ENDPOINT BAHARU: Padam sijil pelajar
+// Padam sijil pelajar
 router.delete(
   "/students/:studentId/certificates/:certId",
   verifyToken,
+  requireOwnershipOrAdmin,
   async (req, res) => {
     try {
       const { studentId, certId } = req.params;
-
-      if (req.user.role !== "admin" && req.user.studentId !== studentId) {
-        return res.status(403).json({ message: "Unauthorized" });
-      }
 
       const student = await Student.findOne({ ID_Pelajar: studentId });
       if (!student)
@@ -226,42 +215,41 @@ router.delete(
   },
 );
 
-// ENDPOINT BAHARU: Muat naik gambar profil pelajar
-router.post("/students/:studentId/profile-image", verifyToken, upload.single('file'), async (req, res) => {
-  try {
-    const { studentId } = req.params;
+// Muat naik gambar profil pelajar (Secured: Middleware runs BEFORE multer)
+router.post(
+  "/students/:studentId/profile-image", 
+  verifyToken, 
+  requireOwnershipOrAdmin, 
+  upload.single('file'), 
+  async (req, res) => {
+    try {
+      const { studentId } = req.params;
 
-    if (req.user.role !== 'admin' && req.user.studentId !== studentId) {
-      if (req.file) fs.unlinkSync(req.file.path);
-      return res.status(403).json({ message: "Unauthorized to upload for this student" });
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const imagePath = `/uploads/certificates/${req.file.filename}`;
+
+      const updatedStudent = await Student.findOneAndUpdate(
+        { ID_Pelajar: studentId },
+        { profileImage: imagePath },
+        { new: true }
+      );
+
+      if (!updatedStudent) {
+        return res.status(404).json({ message: "Student not found" });
+      }
+
+      res.status(200).json({ message: "Profile image updated successfully", imagePath: imagePath });
+    } catch (error) {
+      res.status(500).json({ message: error.message });
     }
-
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
-    }
-
-    const imagePath = `/uploads/certificates/${req.file.filename}`;
-
-    const updatedStudent = await Student.findOneAndUpdate(
-      { ID_Pelajar: studentId },
-      { profileImage: imagePath },
-      { new: true }
-    );
-
-    if (!updatedStudent) {
-      return res.status(404).json({ message: "Student not found" });
-    }
-
-    res.status(200).json({ message: "Profile image updated successfully", imagePath: imagePath });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
   }
-});
+);
 
 // Ramalan AI Manual
-router.post("/predict/manual", verifyToken, async (req, res) => {
-  if (req.user.role !== "admin")
-    return res.status(403).json({ message: "Unauthorized" });
+router.post("/predict/manual", verifyToken, requireAdmin, async (req, res) => {
   try {
     const features = req.body;
     const prediction = await getRealAIPrediction(features);
@@ -274,8 +262,7 @@ router.post("/predict/manual", verifyToken, async (req, res) => {
 // ==========================================
 // NEW ENDPOINT: Upload & Process MDB File
 // ==========================================
-router.post("/data/upload-mdb", verifyToken, mdbUpload.single("file"), async (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Unauthorized" });
+router.post("/data/upload-mdb", verifyToken, requireAdmin, mdbUpload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: "Tiada fail dimuat naik" });
 
   try {
@@ -297,21 +284,15 @@ router.post("/data/upload-mdb", verifyToken, mdbUpload.single("file"), async (re
 
     const { data: students } = await mlResponse.json();
 
-    // 🤖 NEW: AI batch prediction — Status_Pelajar no longer stays 'Pending AI'
+    // 🤖 NEW: AI batch prediction
     if (students.length > 0) {
       try {
         const batchPayload = students.map((s) => ({
           CGPA: parseFloat(s.CGPA) || 0,
           Attendance: parseFloat(s.Kehadiran_Pct) || 0,
-          PLO_1: parseFloat(s.PLO_1) || 0,
-          PLO_2: parseFloat(s.PLO_2) || 0,
-          PLO_3: parseFloat(s.PLO_3) || 0,
-          PLO_4: parseFloat(s.PLO_4) || 0,
-          PLO_5: parseFloat(s.PLO_5) || 0,
-          PLO_6: parseFloat(s.PLO_6) || 0,
-          PLO_7: parseFloat(s.PLO_7) || 0,
-          PLO_8: parseFloat(s.PLO_8) || 0,
-          PLO_9: parseFloat(s.PLO_9) || 0,
+          PLO_1: parseFloat(s.PLO_1) || 0, PLO_2: parseFloat(s.PLO_2) || 0, PLO_3: parseFloat(s.PLO_3) || 0,
+          PLO_4: parseFloat(s.PLO_4) || 0, PLO_5: parseFloat(s.PLO_5) || 0, PLO_6: parseFloat(s.PLO_6) || 0,
+          PLO_7: parseFloat(s.PLO_7) || 0, PLO_8: parseFloat(s.PLO_8) || 0, PLO_9: parseFloat(s.PLO_9) || 0,
           Sijil: s.Sijil_Profesional || "Tiada",
         }));
 
@@ -337,7 +318,7 @@ router.post("/data/upload-mdb", verifyToken, mdbUpload.single("file"), async (re
       }
     }
 
-    // LANGKAH BAHARU: Sync Data (Padam pelajar lama yang tiada dalam fail baharu)
+    // Sync Data
     if (students.length > 0) {
       const newStudentIds = students.map(s => s.ID_Pelajar);
       const deleteResult = await Student.deleteMany({
@@ -346,7 +327,6 @@ router.post("/data/upload-mdb", verifyToken, mdbUpload.single("file"), async (re
       console.log(`🧹 Sync: ${deleteResult.deletedCount} pelajar lama telah dipadam.`);
     }
 
-    // 🚀 FIX OOM: Guna BULKWRITE untuk jimat RAM dan laju! (Tiada lagi loop Mongoose.save)
     const salt = await bcrypt.genSalt(10);
     const defaultPassword = await bcrypt.hash("password123", salt);
 
@@ -359,18 +339,11 @@ router.post("/data/upload-mdb", verifyToken, mdbUpload.single("file"), async (re
           filter: { ID_Pelajar: data.ID_Pelajar },
           update: {
             $set: {
-              Nama: data.Nama,
-              Kursus: data.Kursus,
-              Semester: data.Semester,
-              CGPA: data.CGPA,
-              Kehadiran_Pct: data.Kehadiran_Pct,
-              Anugerah: data.Anugerah,
-              Koko_Lulus: data.Koko_Lulus,
-              Status_Pelajar: data.Status_Pelajar,
-              Sijil_Profesional: data.Sijil_Profesional,
-              No_KP: data.No_KP || '',
-              No_Telefon: data.No_Telefon || '',
-              Alamat: data.Alamat || '',
+              Nama: data.Nama, Kursus: data.Kursus, Semester: data.Semester,
+              CGPA: data.CGPA, Kehadiran_Pct: data.Kehadiran_Pct, Anugerah: data.Anugerah,
+              Koko_Lulus: data.Koko_Lulus, Status_Pelajar: data.Status_Pelajar,
+              Sijil_Profesional: data.Sijil_Profesional, No_KP: data.No_KP || '',
+              No_Telefon: data.No_Telefon || '', Alamat: data.Alamat || '',
               PLO_1: data.PLO_1, PLO_2: data.PLO_2, PLO_3: data.PLO_3,
               PLO_4: data.PLO_4, PLO_5: data.PLO_5, PLO_6: data.PLO_6,
               PLO_7: data.PLO_7, PLO_8: data.PLO_8, PLO_9: data.PLO_9,
@@ -386,10 +359,8 @@ router.post("/data/upload-mdb", verifyToken, mdbUpload.single("file"), async (re
           filter: { email: `${data.ID_Pelajar}@student.ikmb.edu.my` },
           update: {
             $set: {
-              password: defaultPassword,
-              role: "user",
-              displayName: data.Nama,
-              studentId: data.ID_Pelajar,
+              password: defaultPassword, role: "user",
+              displayName: data.Nama, studentId: data.ID_Pelajar,
             }
           },
           upsert: true
@@ -397,7 +368,6 @@ router.post("/data/upload-mdb", verifyToken, mdbUpload.single("file"), async (re
       });
     }
 
-    // Execute bulk writes (Hantar semua 3,800 rekod dalam 2 network request sahaja!)
     if (studentOps.length > 0) await Student.bulkWrite(studentOps);
     if (userOps.length > 0) await User.bulkWrite(userOps);
 

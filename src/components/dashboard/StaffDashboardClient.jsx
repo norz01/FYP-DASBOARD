@@ -17,6 +17,7 @@ import Sidebar from "../Sidebar";
 import KpiCard from "../KpiCard";
 import StudentModal from "../StudentModal";
 import StudentListGrid from "../StudentListGrid";
+import { calculateEmployability, calculateTopPerformerScore } from "@/lib/heuristics";
 
 ChartJS.register(
   CategoryScale,
@@ -109,15 +110,11 @@ export default function StaffDashboardClient() {
       Number(s.cgpa) < 2.0,
   );
   const highRiskCount = highRiskStudents.length;
-  const calculateEmployability = (s) =>
-    Math.min(
-      100,
-      Math.round((Number(s.cgpa) / 4) * 40 + Number(s.attendance) * 0.6),
-    );
+const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
   const averageEmployability =
     totalStudents > 0
       ? (
-          students.reduce((acc, s) => acc + calculateEmployability(s), 0) /
+          students.reduce((acc, s) => acc + getEmployability(s), 0) /
           totalStudents
         ).toFixed(1)
       : 0;
@@ -476,16 +473,10 @@ export default function StaffDashboardClient() {
                               : `Sijil: ${s.certification}`}
                           </p>
                         </div>
-                        <span className="text-xl font-bold text-yellow-600">
-                          {Math.min(
-                            100,
-                            Math.round(
-                              (Number(s.cgpa) / 4) * 60 +
-                                Number(s.attendance) * 0.4,
-                            ),
-                          )}
-                          %
-                        </span>
+<span className="text-xl font-bold text-yellow-600">
+                           {calculateTopPerformerScore(s.cgpa, s.attendance)}
+                           %
+                         </span>
                       </div>
                     ))}
                   </div>
