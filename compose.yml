@@ -19,13 +19,17 @@ services:
     container_name: tvet_backend
     ports:
       - "5000:5000"
-    env_file:
-      - ./backend/.env
     environment:
+      - NODE_ENV=development        # Forces Express to show detailed error logs
+      - JWT_SECRET=super_secret_fyp_key_2026 # Hardcoded secret to bypass .env issues
       - MONGO_URI=mongodb://mongodb:27017/ikmb-dashboard
       - ML_API_URL=http://ml-api:8000
+      - GEMINI_API_KEY=AQ.Ab8RN6Kx_TfUgeiZpkyM-16TlDoOQwAtvVSGhxe9rwl9QB2B0g
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
     depends_on:
       - mongodb
+    volumes:
+      - ./backend/uploads:/app/uploads:Z
     command: sh -c "sleep 5 && npm run start:prod"
     restart: always
     networks:

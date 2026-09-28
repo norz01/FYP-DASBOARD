@@ -1,26 +1,17 @@
-const backendUrl = process.env.BACKEND_URL || 'http://127.0.0.1:5000';
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
-  reactStrictMode: true,
-  images: {
-    remotePatterns: [
-      { protocol: 'http', hostname: '127.0.0.1', port: '5000' },
-      { protocol: 'http', hostname: 'localhost', port: '5000' },
-      { protocol: 'http', hostname: 'backend', port: '5000' }
-    ],
-  },
   async rewrites() {
     return [
       {
-        source: '/api/:path*',
-        destination: `${backendUrl}/api/:path*`,
+        source: "/api/:path*",
+        // Hardcoded to the Docker Compose service name and internal port
+        destination: "http://backend:5000/api/:path*", 
       },
       {
-        source: '/uploads/:path*',
-        destination: `${backendUrl}/uploads/:path*`,
-      },
+        source: "/uploads/:path*",
+        destination: "http://backend:5000/uploads/:path*",
+      }
     ];
   },
 };

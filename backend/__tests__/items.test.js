@@ -4,7 +4,7 @@ import app from '../server.js';
 describe('Student API Security', () => {
   it('should block access to /api/students without a token', async () => {
     const res = await request(app).get('/api/students');
-    expect(res.statusCode).toEqual(403); // Forbidden
+    expect(res.statusCode).toEqual(401); // Unauthorized (no token)
   });
 
   it('should block access with an invalid token', async () => {
