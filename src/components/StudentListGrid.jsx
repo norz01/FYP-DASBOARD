@@ -15,6 +15,7 @@ export default function StudentListGrid({
   students,
   onViewProfile,
   onAddStudent,
+  readOnly = false,
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("Semua");
@@ -32,9 +33,9 @@ export default function StudentListGrid({
   const filters = ["Semua", "ITW", "DFK", "DGA", "SLR", "DCG", "SED", "PPU"];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-[fadeIn_0.3s_ease-in-out]">
       {/* Header & Search */}
-      <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+      <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center animate-[slideUp_0.4s_ease-out]">
         <div>
           <h2 className="text-xl font-bold text-[#0A1628]">
             Pengurusan Pelajar
@@ -52,27 +53,29 @@ export default function StudentListGrid({
               placeholder="Cari nama atau ID pelajar..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white border border-[rgba(18,81,170,0.13)] rounded-lg text-sm text-[#0A1628] focus:outline-none focus:ring-2 focus:ring-[#1251AA]"
+              className="w-full pl-10 pr-4 py-2.5 bg-white border border-[rgba(18,81,170,0.13)] rounded-lg text-sm text-[#0A1628] focus:outline-none focus:ring-2 focus:ring-[#1251AA] transition-shadow duration-200"
             />
           </div>
-          <button
-            onClick={onAddStudent}
-            className="bg-[#1251AA] text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-[#0C2461] transition-colors flex items-center gap-2"
-          >
-            <i className="ph-bold ph-plus text-lg"></i> Tambah
-          </button>
+          {!readOnly && onAddStudent && (
+            <button
+              onClick={onAddStudent}
+              className="bg-[#1251AA] text-white px-4 py-2.5 rounded-lg font-medium text-sm hover:bg-[#0C2461] hover:shadow-lg hover:shadow-[#1251AA]/20 transition-all duration-300 active:scale-95 flex items-center gap-2"
+            >
+              <i className="ph-bold ph-plus text-lg"></i> Tambah
+            </button>
+          )}
         </div>
       </div>
 
       {/* Filter Chips */}
-      <div className="flex gap-2 overflow-x-auto pb-2">
+      <div className="flex gap-2 overflow-x-auto pb-2 animate-[slideUp_0.4s_ease-out_0.1s] anim-fill">
         {filters.map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-200 active:scale-95 ${
               filter === f
-                ? "bg-[#0C2461] text-white"
+                ? "bg-[#0C2461] text-white shadow-md shadow-[#0C2461]/20"
                 : "bg-white text-[#5A6A85] hover:bg-gray-50 border border-[rgba(18,81,170,0.13)]"
             }`}
           >
@@ -81,9 +84,9 @@ export default function StudentListGrid({
         ))}
       </div>
 
-      {/* Student Grid */}
+      {/* Student Grid — staggered entrance */}
       {filteredStudents.length === 0 ? (
-        <div className="bg-white border border-[rgba(18,81,170,0.13)] rounded-xl p-12 text-center">
+        <div className="bg-white border border-[rgba(18,81,170,0.13)] rounded-xl p-12 text-center animate-[scaleIn_0.3s_ease-out]">
           <i className="ph ph-smiley-sad text-5xl text-[#5A6A85] mb-4"></i>
           <h3 className="text-lg font-medium text-[#0A1628]">
             Tiada pelajar dijumpai
@@ -94,11 +97,12 @@ export default function StudentListGrid({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredStudents.map((student) => (
+          {filteredStudents.map((student, index) => (
             <div
               key={student.id}
               onClick={() => onViewProfile(student.id)}
-              className="relative bg-white border border-[rgba(18,81,170,0.13)] rounded-xl overflow-hidden cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all duration-300"
+              className="relative bg-white border border-[rgba(18,81,170,0.13)] rounded-xl overflow-hidden cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all duration-300 animate-[slideUp_0.4s_ease-out] anim-fill"
+              style={{ animationDelay: `${Math.min(index * 60, 480)}ms` }}
             >
               <div className="h-20 bg-[#0C2461] flex justify-end items-start p-3 relative">
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-white/15 text-white backdrop-blur-sm border border-white/20 shadow-sm">
@@ -107,7 +111,7 @@ export default function StudentListGrid({
                 </span>
               </div>
 
-              <div className="absolute top-8 left-1/2 -translate-x-1/2 w-24 h-24 rounded-full bg-[#1251AA] text-white text-3xl font-bold flex items-center justify-center border-4 border-white shadow-md z-10">
+              <div className="absolute top-8 left-1/2 -translate-x-1/2 w-24 h-24 rounded-full bg-[#1251AA] text-white text-3xl font-bold flex items-center justify-center border-4 border-white shadow-md z-10 transition-transform duration-300 group-hover:scale-105">
                 {student.nama?.charAt(0)}
               </div>
 

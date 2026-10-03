@@ -3,11 +3,7 @@ const nextConfig = {
   output: 'standalone',
   async rewrites() {
     return [
-      {
-        source: "/api/:path*",
-        // Hardcoded to the Docker Compose service name and internal port
-        destination: "http://backend:5000/api/:path*", 
-      },
+      // /api rewrite DIBUANG. Guna src/app/api/[...proxy]/route.js
       {
         source: "/uploads/:path*",
         destination: "http://backend:5000/uploads/:path*",

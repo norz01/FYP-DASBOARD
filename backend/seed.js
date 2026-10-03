@@ -2,7 +2,6 @@ import mongoose from "mongoose";
 import fs from "fs";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
-
 import Student from "./models/Student.js";
 import User from "./models/User.js";
 
@@ -14,12 +13,30 @@ const MONGO_URI =
 const seedDatabase = async () => {
   try {
     await mongoose.connect(MONGO_URI);
-    console.log("✅ Berjaya bersambung ke MongoDB.");
 
+    console.log("✅ Berjaya bersambung ke MongoDB.");
     console.log("🔄 Memulakan proses upsert (tidak memadam data sedia ada)...");
 
-    const rawData = fs.readFileSync("./db/data_tvet_muktamad.json", "utf-8");
-    const students = JSON.parse(rawData);
+    let students = [];
+
+    const dataPath = "./db/data_tvet_muktamad.json";
+
+    if (fs.existsSync(dataPath)) {
+      try {
+        const rawData = fs.readFileSync(dataPath, "utf-8");
+        const parsedData = JSON.parse(rawData);
+
+        if (Array.isArray(parsedData)) {
+          students = parsedData;
+        }
+      } catch (error) {
+        console.warn("⚠️ Gagal membaca data_tvet_muktamad.json:", error.message);
+        students = [];
+      }
+    } else {
+      console.warn("⚠️ data_tvet_muktamad.json tidak dijumpai.");
+      console.warn("⚠️ Hanya akaun demo akan ditambah.");
+    }
 
     console.log(`🚀 Memproses ${students.length} pelajar...`);
 
@@ -27,7 +44,6 @@ const seedDatabase = async () => {
     const defaultPassword = await bcrypt.hash("password123", salt);
 
     for (let data of students) {
-      // Upsert Student: Kemaskini jika wujud, cipta jika tiada. $set hanya kemaskini medan dari JSON.
       await Student.findOneAndUpdate(
         { ID_Pelajar: data.ID_Pelajar },
         {
@@ -53,10 +69,9 @@ const seedDatabase = async () => {
             academicHistory: data.academicHistory || [],
           },
         },
-        { upsert: true, returnDocument: 'after' },
+        { upsert: true, returnDocument: "after" }
       );
 
-      // Upsert User
       await User.findOneAndUpdate(
         { email: `${data.ID_Pelajar}@student.ikmb.edu.my` },
         {
@@ -67,12 +82,12 @@ const seedDatabase = async () => {
             studentId: data.ID_Pelajar,
           },
         },
-        { upsert: true, returnDocument: 'after' },
+        { upsert: true, returnDocument: "after" }
       );
     }
 
-    // Tambah akaun Admin Default
     console.log("👑 Menambah akaun admin...");
+
     await User.findOneAndUpdate(
       { email: "admin@ikmb.edu.my" },
       {
@@ -83,8 +98,25 @@ const seedDatabase = async () => {
           studentId: null,
         },
       },
-      { upsert: true, returnDocument: 'after' },
+      { upsert: true, returnDocument: "after" }
     );
+
+    console.log("🧑 Menambah akaun counselor...");
+
+    await User.findOneAndUpdate(
+      { email: "counselor@ikmb.edu.my" },
+      {
+        $set: {
+          password: defaultPassword,
+          role: "counselor",
+          displayName: "Counselor IKMB",
+          studentId: null,
+        },
+      },
+      { upsert: true, returnDocument: "after" }
+    );
+
+    console.log("👤 Menambah akaun user demo...");
 
     await User.findOneAndUpdate(
       { email: "user@ikmb.edu.my" },
@@ -96,10 +128,11 @@ const seedDatabase = async () => {
           studentId: null,
         },
       },
-      { upsert: true, returnDocument: 'after' },
+      { upsert: true, returnDocument: "after" }
     );
 
     console.log("✨ SELESAI! Data dikemas kini tanpa memadam sijil/profile.");
+
     process.exit();
   } catch (error) {
     console.error("❌ Ralat:", error);

@@ -24,7 +24,7 @@ services:
       - JWT_SECRET=super_secret_fyp_key_2026 # Hardcoded secret to bypass .env issues
       - MONGO_URI=mongodb://mongodb:27017/ikmb-dashboard
       - ML_API_URL=http://ml-api:8000
-      - GEMINI_API_KEY=AQ.Ab8RN6Kx_TfUgeiZpkyM-16TlDoOQwAtvVSGhxe9rwl9QB2B0g
+      - GEMINI_API_KEY=AQ.Ab8RN6LpAzfr6fpHl-P8-4XJnKK0TSGXZg2p6emOvzLPfDpmSQ
       - CORS_ORIGIN=${CORS_ORIGIN:-*}
     depends_on:
       - mongodb

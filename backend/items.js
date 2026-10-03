@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
@@ -17,7 +16,7 @@ import {
   deleteStudent,
   getRealAIPrediction,
 } from "./item.model.js";
-import { verifyToken, requireAdmin, requireOwnershipOrAdmin } from "./middleware/authMiddleware.js";
+import { verifyToken, requireAdmin, requireStaff, requireOwnershipOrAdmin } from "./middleware/authMiddleware.js";
 
 const router = Router();
 
@@ -65,6 +64,92 @@ function sanitizeHistory(raw) {
   if (valid.length && valid[valid.length - 1].role === "user") valid.pop();
 
   return valid;
+}
+
+// ============================================================
+// GEMINI REST API HELPER (supports AQ-format keys via header)
+// SDK (@google/generative-ai) not used — it cannot send
+// x-goog-api-key header required for AQ keys.
+// ============================================================
+const GEMINI_MODEL = "gemini-3.5-flash-lite";
+const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/**
+ * Calls Gemini generateContent via REST API.
+ * Uses x-goog-api-key header (required for AQ-format keys).
+ */
+async function callGeminiAPI({ systemPrompt, contents, temperature = 0.4, maxOutputTokens = 1024 }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY tidak diset.");
+
+  const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
+
+  const body = {
+    systemInstruction: {
+      parts: [{ text: systemPrompt }],
+    },
+    contents,
+    generationConfig: {
+      temperature,
+      maxOutputTokens,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "Unknown error");
+    throw new Error(`Gemini API ${res.status}: ${errText}`);
+  }
+
+  const data = await res.json();
+  const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return reply;
+}
+
+/**
+ * Calls Gemini streamGenerateContent via REST API (SSE).
+ * Returns the raw Response object for streaming to client.
+ */
+async function callGeminiStreamAPI({ systemPrompt, contents, temperature = 0.4, maxOutputTokens = 1024 }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY tidak diset.");
+
+  const url = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:streamGenerateContent?alt=sse`;
+
+  const body = {
+    systemInstruction: {
+      parts: [{ text: systemPrompt }],
+    },
+    contents,
+    generationConfig: {
+      temperature,
+      maxOutputTokens,
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "Unknown error");
+    throw new Error(`Gemini Stream API ${res.status}: ${errText}`);
+  }
+
+  return res;
 }
 
 const storage = multer.diskStorage({
@@ -146,7 +231,7 @@ router.get("/students", verifyToken, async (req, res) => {
 });
 
 // Tambah pelajar baharu
-router.post("/students", verifyToken, requireAdmin, async (req, res) => {
+router.post("/students", verifyToken, requireStaff, async (req, res) => {
   try {
     const student = await createStudent(req.body);
     res.status(201).json(student);
@@ -156,7 +241,7 @@ router.post("/students", verifyToken, requireAdmin, async (req, res) => {
 });
 
 // Kemaskini pelajar
-router.put("/students/:studentId", verifyToken, requireAdmin, async (req, res) => {
+router.put("/students/:studentId", verifyToken, requireStaff, async (req, res) => {
   try {
     const updated = await updateStudent(req.params.studentId, req.body);
     if (!updated) return res.status(404).json({ message: "Student not found" });
@@ -167,7 +252,7 @@ router.put("/students/:studentId", verifyToken, requireAdmin, async (req, res) =
 });
 
 // Padam pelajar
-router.delete("/students/:studentId", verifyToken, requireAdmin, async (req, res) => {
+router.delete("/students/:studentId", verifyToken, requireStaff, async (req, res) => {
   try {
     const deleted = await deleteStudent(req.params.studentId);
     if (!deleted) return res.status(404).json({ message: "Student not found" });
@@ -312,7 +397,7 @@ router.post(
 );
 
 // Ramalan AI Manual
-router.post("/predict/manual", verifyToken, requireAdmin, async (req, res) => {
+router.post("/predict/manual", verifyToken, requireStaff, async (req, res) => {
   try {
     const features = req.body;
     const prediction = await getRealAIPrediction(features);
@@ -525,7 +610,7 @@ router.delete("/data/mdb-files/:id", verifyToken, requireAdmin, async (req, res)
 // ==========================================
 // AI CHATBOT ROUTE (GEMINI INTEGRATION)
 // ==========================================
-router.post("/ai/chat", verifyToken, requireAdmin, aiRateLimiter, async (req, res) => {
+router.post("/ai/chat", verifyToken, requireStaff, aiRateLimiter, async (req, res) => {
   try {
     const { studentId, userMessage, chatHistory } = req.body || {};
 
@@ -622,30 +707,52 @@ ${TVET_KNOWLEDGE}
 ${JSON.stringify(studentDataForAI, null, 2)}
 </DATA_PELAJAR>`;
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-3.5-flash-lite",
-      systemInstruction: systemPrompt,
-      generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
+    // Build contents array from sanitized history + current message
+    const contents = [...sanitizeHistory(chatHistory)];
+    contents.push({
+      role: "user",
+      parts: [{ text: userMessage.trim().slice(0, AI_MAX_MESSAGE_LENGTH) }],
     });
 
-    const chat = model.startChat({ history: sanitizeHistory(chatHistory) });
-
-    // --- STREAMING RESPONSE (typewriter UX) ---
+    // --- STREAMING RESPONSE (typewriter UX) via REST SSE ---
     try {
-      // 1. Cuba gunakan streaming (Sintaks Rasmi Google SDK)
-      const result = await chat.sendMessageStream(userMessage.trim());
+      const streamRes = await callGeminiStreamAPI({
+        systemPrompt,
+        contents,
+        temperature: 0.4,
+        maxOutputTokens: 1024,
+      });
 
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.setHeader("Cache-Control", "no-cache, no-transform");
       res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders?.();
 
+      const decoder = new TextDecoder();
+      let buffer = "";
       let hasWritten = false;
-      for await (const chunk of result.stream) {
-        const text = chunk.text();
-        if (text) {
-          res.write(text, "utf8");
-          hasWritten = true;
+
+      // Node fetch body is async-iterable (works in Node 18+)
+      for await (const chunk of streamRes.body) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+          const payload = trimmed.slice(6).trim();
+          if (!payload || payload === "[DONE]") continue;
+          try {
+            const json = JSON.parse(payload);
+            const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              res.write(text, "utf8");
+              hasWritten = true;
+            }
+          } catch {
+            // Skip non-JSON SSE lines
+          }
         }
       }
 
@@ -653,19 +760,23 @@ ${JSON.stringify(studentDataForAI, null, 2)}
         res.write("Maaf, tiada respons dijana. Sila cuba lagi.", "utf8");
       }
       res.end();
-
+      return;
     } catch (streamError) {
-      // 2. FALLBACK: Jika streaming gagal (cth: disekat oleh proxy/Docker),
+      // FALLBACK: Jika streaming gagal (cth: disekat oleh proxy/Docker),
       // gunakan cara biasa (JSON) supaya sistem tidak terus crash.
       console.warn("⚠️ Streaming gagal, menggunakan mod sandaran (JSON):", streamError.message);
 
       if (!res.headersSent) {
-        const fallbackResult = await chat.sendMessage(userMessage.trim());
-        const fallbackText = fallbackResult.response.text();
-        res.json({ success: true, reply: fallbackText || "Maaf, saya tidak dapat menjana respons." });
-      } else {
-        res.end();
+        const fallbackText = await callGeminiAPI({
+          systemPrompt,
+          contents,
+          temperature: 0.4,
+          maxOutputTokens: 1024,
+        });
+        return res.json({ success: true, reply: fallbackText || "Maaf, saya tidak dapat menjana respons." });
       }
+      if (!res.writableEnded) res.end();
+      return;
     }
   } catch (error) {
     console.error("❌ AI Chat Error:", error?.message || error); // Never leak full error/key info

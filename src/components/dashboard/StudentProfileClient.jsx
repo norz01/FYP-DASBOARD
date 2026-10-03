@@ -1,7 +1,9 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getClientToken } from "@/lib/client-auth";
+import { getClientUser, getClientToken } from "@/lib/client-auth";
+import ReportFormModal from "../ReportFormModal";
+import GenerateReportModal from "../GenerateReportModal";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -80,6 +82,12 @@ export default function StudentProfileClient({ studentId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("personal");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [interventionModal, setInterventionModal] = useState({
+    isOpen: false,
+    type: null,
+  });
+  const [generateReportOpen, setGenerateReportOpen] = useState(false);
 
   useEffect(() => {
     if (!studentId) return;
@@ -91,6 +99,12 @@ export default function StudentProfileClient({ studentId }) {
       .catch(() => setSkillGap(null))
       .finally(() => setLoading(false));
   }, [studentId]);
+
+  useEffect(() => {
+    setCurrentUser(getClientUser());
+  }, []);
+
+  const isStaff = currentUser?.role === "admin" || currentUser?.role === "counselor";
 
   if (loading)
     return (
@@ -218,12 +232,13 @@ export default function StudentProfileClient({ studentId }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#EEF3FB] p-6 font-sans">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="min-h-screen bg-[#EEF3FB] p-6 font-sans animate-[fadeIn_0.4s_ease-out]">
+      {/* Breadcrumb */}
+      <div className="mb-6 flex items-center justify-between animate-[slideUp_0.4s_ease-out]">
         <div className="flex items-center gap-2 text-sm">
           <button
             onClick={() => router.push("/staff-dashboard")}
-            className="flex items-center gap-1 text-[#5A6A85] hover:text-[#1251AA] font-medium"
+            className="flex items-center gap-1 text-[#5A6A85] hover:text-[#1251AA] font-medium transition-colors duration-200"
           >
             <i className="ph-bold ph-arrow-left"></i> Senarai Pelajar
           </button>
@@ -233,85 +248,84 @@ export default function StudentProfileClient({ studentId }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Panel */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-xl shadow-sm border border-[rgba(18,81,170,0.13)] overflow-hidden sticky top-6">
+        {/* Left Panel — slides in from left */}
+        <div className="lg:col-span-1 animate-[slideInLeft_0.5s_ease-out_0.1s] anim-fill">
+          <div className="bg-white rounded-xl shadow-sm border border-[rgba(18,81,170,0.13)] overflow-hidden sticky top-6 hover:shadow-md transition-shadow duration-300">
             <div className="h-24 bg-[#0C2461] p-4 flex justify-between items-start">
               <div>
                 <p className="text-white font-bold text-sm">TVETMARA IKMB</p>
-                <p className="text-white/70 text-xs">
-                  Sistem Pengurusan Pelajar
-                </p>
+                <p className="text-white/70 text-xs">Sistem Pengurusan Pelajar</p>
               </div>
               <StatusBadge status={student.dropoutRisk} />
             </div>
 
             <div className="px-6 pb-6 -mt-12 text-center">
-              <div className="w-24 h-24 mx-auto rounded-full bg-[#1251AA] text-white text-4xl font-bold flex items-center justify-center border-4 border-white mb-3">
+              <div className="w-24 h-24 mx-auto rounded-full bg-[#1251AA] text-white text-4xl font-bold flex items-center justify-center border-4 border-white mb-3 animate-[scaleIn_0.4s_ease-out_0.3s] anim-fill">
                 {student.nama?.charAt(0) || "?"}
               </div>
-              <h2 className="text-lg font-bold text-[#0A1628]">
-                {student.nama || "Nama Tidak Diketahui"}
-              </h2>
+              <h2 className="text-lg font-bold text-[#0A1628]">{student.nama || "Nama Tidak Diketahui"}</h2>
               <p className="text-sm text-[#5A6A85] font-mono">{student.id}</p>
 
               <div className="mt-6 space-y-3 text-left">
                 <div className="flex justify-between text-sm py-2 border-b border-gray-100">
                   <span className="text-[#5A6A85]">Kursus</span>
-                  <span className="font-medium text-[#0A1628] text-right">
-                    {getFullCourseName(student.kursus)}
-                  </span>
+                  <span className="font-medium text-[#0A1628] text-right">{getFullCourseName(student.kursus)}</span>
                 </div>
                 <div className="flex justify-between text-sm py-2 border-b border-gray-100">
                   <span className="text-[#5A6A85]">Semester</span>
-                  <span className="font-medium text-[#0A1628]">
-                    {student.semester || "2"}
-                  </span>
+                  <span className="font-medium text-[#0A1628]">{student.semester || "2"}</span>
                 </div>
                 <div className="flex justify-between text-sm py-2 border-b border-gray-100">
                   <span className="text-[#5A6A85]">Sijil</span>
-                  <span className="font-medium text-[#0A1628]">
-                    {student.certification || "Tiada"}
-                  </span>
+                  <span className="font-medium text-[#0A1628]">{student.certification || "Tiada"}</span>
                 </div>
                 <div className="flex justify-between text-sm py-2">
                   <span className="text-[#5A6A85]">Kehadiran</span>
-                  <span className="font-medium text-[#0A1628]">
-                    {attendanceVal}%
-                  </span>
+                  <span className="font-medium text-[#0A1628]">{attendanceVal}%</span>
                 </div>
               </div>
 
+              {/* Action buttons with stagger */}
               <div className="mt-6 grid grid-cols-3 gap-2">
-                <button className="bg-[#1251AA] text-white py-2 rounded-lg text-xs font-medium hover:bg-[#0C2461] flex items-center justify-center gap-1">
+                <button className="bg-[#1251AA] text-white py-2 rounded-lg text-xs font-medium hover:bg-[#0C2461] hover:shadow-md flex items-center justify-center gap-1 transition-all duration-200 active:scale-95">
                   <i className="ph-bold ph-pencil-simple"></i> Edit
                 </button>
                 <button
                   onClick={handlePrint}
-                  className="bg-gray-100 text-[#5A6A85] py-2 rounded-lg text-xs font-medium hover:bg-gray-200 flex items-center justify-center transition-colors"
+                  className="bg-gray-100 text-[#5A6A85] py-2 rounded-lg text-xs font-medium hover:bg-gray-200 flex items-center justify-center transition-all duration-200 active:scale-95"
                 >
                   <i className="ph-bold ph-printer"></i>
                 </button>
                 <button
                   onClick={handleDownload}
-                  className="bg-gray-100 text-[#5A6A85] py-2 rounded-lg text-xs font-medium hover:bg-gray-200 flex items-center justify-center transition-colors"
+                  className="bg-gray-100 text-[#5A6A85] py-2 rounded-lg text-xs font-medium hover:bg-gray-200 flex items-center justify-center transition-all duration-200 active:scale-95"
                 >
                   <i className="ph-bold ph-download-simple"></i>
+                </button>
+              </div>
+
+              <div className="mt-3">
+                <button
+                  onClick={() => setGenerateReportOpen(true)}
+                  className="w-full bg-emerald-600 text-white py-2 rounded-lg text-xs font-medium hover:bg-emerald-700 hover:shadow-md hover:shadow-emerald-600/20 flex items-center justify-center gap-1 transition-all duration-200 active:scale-95"
+                >
+                  <i className="ph-bold ph-file-text"></i> Jana Laporan / Surat
                 </button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Panel */}
-        <div className="lg:col-span-2">
+        {/* Right Panel — slides in from right */}
+        <div className="lg:col-span-2 animate-[slideInRight_0.5s_ease-out_0.15s] anim-fill">
           <div className="bg-white rounded-xl shadow-sm border border-[rgba(18,81,170,0.13)]">
+            {/* Tab bar */}
             <div className="border-b border-gray-200 flex">
               {["personal", "academic", "skills"].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === tab ? "border-[#1251AA] text-[#1251AA]" : "border-transparent text-[#5A6A85] hover:text-[#0A1628]"}`}
+                  className={`px-6 py-4 text-sm font-medium border-b-2 transition-all duration-200 ${activeTab === tab ? "border-[#1251AA] text-[#1251AA]" : "border-transparent text-[#5A6A85] hover:text-[#0A1628] hover:border-slate-300"}`}
                 >
                   {tab === "personal"
                     ? "Maklumat Peribadi"
@@ -323,92 +337,62 @@ export default function StudentProfileClient({ studentId }) {
             </div>
 
             <div className="p-6">
+              {/* Personal Tab */}
               {activeTab === "personal" && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h3 className="text-sm uppercase tracking-wide text-[#5A6A85] font-medium">
-                      Maklumat Asas
-                    </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-[fadeIn_0.3s_ease-in-out]">
+                  <div className="space-y-4 animate-[slideUp_0.4s_ease-out]">
+                    <h3 className="text-sm uppercase tracking-wide text-[#5A6A85] font-medium">Maklumat Asas</h3>
                     <div>
                       <label className="text-xs text-[#5A6A85]">Email</label>
-                      <p className="text-sm text-[#0A1628] font-mono mt-1 break-all">
-                        {student.id}@student.ikmb.edu.my
-                      </p>
+                      <p className="text-sm text-[#0A1628] font-mono mt-1 break-all">{student.id}@student.ikmb.edu.my</p>
                     </div>
                     <div>
-                      <label className="text-xs text-[#5A6A85]">
-                        No. Telefon
-                      </label>
-                      <p className="text-sm text-[#0A1628] font-mono mt-1">
-                        {student.noTelefon || "Tiada Rekod"}
-                      </p>
+                      <label className="text-xs text-[#5A6A85]">No. Telefon</label>
+                      <p className="text-sm text-[#0A1628] font-mono mt-1">{student.noTelefon || "Tiada Rekod"}</p>
                     </div>
                     <div>
                       <label className="text-xs text-[#5A6A85]">No. KP</label>
-                      <p className="text-sm text-[#0A1628] font-mono mt-1">
-                        {student.noKP || "Tiada Rekod"}
-                      </p>
+                      <p className="text-sm text-[#0A1628] font-mono mt-1">{student.noKP || "Tiada Rekod"}</p>
                     </div>
                   </div>
-                  <div className="space-y-4">
-                    <h3 className="text-sm uppercase tracking-wide text-[#5A6A85] font-medium">
-                      Alamat
-                    </h3>
-                    <p className="text-sm text-[#0A1628] leading-relaxed">
-                      {student.alamat || "Tiada Rekod"}
-                    </p>
+                  <div className="space-y-4 animate-[slideUp_0.4s_ease-out_0.1s] anim-fill">
+                    <h3 className="text-sm uppercase tracking-wide text-[#5A6A85] font-medium">Alamat</h3>
+                    <p className="text-sm text-[#0A1628] leading-relaxed">{student.alamat || "Tiada Rekod"}</p>
                   </div>
                 </div>
               )}
 
+              {/* Academic Tab */}
               {activeTab === "academic" && (
-                <div className="space-y-6">
-                  <div className="bg-[#EEF3FB] p-4 rounded-lg flex items-center justify-between">
+                <div className="space-y-6 animate-[fadeIn_0.3s_ease-in-out]">
+                  <div className="bg-[#EEF3FB] p-4 rounded-lg flex items-center justify-between animate-[slideUp_0.4s_ease-out]">
                     <div>
-                      <p className="text-sm text-[#5A6A85]">
-                        Purata Gred Kumulatif (CGPA)
-                      </p>
+                      <p className="text-sm text-[#5A6A85]">Purata Gred Kumulatif (CGPA)</p>
                       <p className="text-3xl font-bold text-[#0A1628] mt-1">
                         {cgpaVal.toFixed(2)}{" "}
-                        <span className="text-base font-normal text-[#5A6A85]">
-                          / 4.00
-                        </span>
+                        <span className="text-base font-normal text-[#5A6A85]">/ 4.00</span>
                       </p>
                     </div>
                     <div className="w-1/2 bg-gray-200 rounded-full h-2.5 overflow-hidden">
                       <div
-                        className={`${cgpaColor} h-full rounded-full`}
+                        className={`${cgpaColor} h-full rounded-full transition-all duration-700 ease-out`}
                         style={{ width: `${(cgpaVal / 4) * 100}%` }}
                       ></div>
                     </div>
                   </div>
 
-                  <div className="border border-gray-100 p-4 rounded-lg">
-                    <h4 className="text-sm font-medium text-[#0A1628] mb-4">
-                      Trend GPA & Kehadiran
-                    </h4>
+                  <div className="border border-gray-100 p-4 rounded-lg animate-[slideUp_0.4s_ease-out_0.15s] anim-fill">
+                    <h4 className="text-sm font-medium text-[#0A1628] mb-4">Trend GPA & Kehadiran</h4>
                     <div className="h-64">
                       <Bar
                         data={trendData}
                         options={{
                           maintainAspectRatio: false,
                           scales: {
-                            y: {
-                              type: "linear",
-                              display: true,
-                              position: "left",
-                              max: 4,
-                              title: { display: true, text: "GPA" },
-                            },
-                            y1: {
-                              type: "linear",
-                              display: true,
-                              position: "right",
-                              max: 100,
-                              title: { display: true, text: "Kehadiran (%)" },
-                              grid: { drawOnChartArea: false },
-                            },
+                            y: { type: "linear", display: true, position: "left", max: 4, title: { display: true, text: "GPA" } },
+                            y1: { type: "linear", display: true, position: "right", max: 100, title: { display: true, text: "Kehadiran (%)" }, grid: { drawOnChartArea: false } },
                           },
+                          animation: { duration: 800, easing: 'easeOutQuart' },
                         }}
                       />
                     </div>
@@ -416,34 +400,30 @@ export default function StudentProfileClient({ studentId }) {
                 </div>
               )}
 
+              {/* Skills Tab */}
               {activeTab === "skills" && (
-                <div className="space-y-6">
-                  <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-4 rounded-lg text-white relative overflow-hidden">
-                    <i className="ph-fill ph-magic-wand absolute -right-4 -bottom-4 text-7xl text-white/5"></i>
+                <div className="space-y-6 animate-[fadeIn_0.3s_ease-in-out]">
+                  {/* AI Employability Card */}
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-4 rounded-lg text-white relative overflow-hidden animate-[slideUp_0.4s_ease-out]">
+                    <i className="ph-fill ph-magic-wand absolute -right-4 -bottom-4 text-7xl text-white/5 animate-[floatSoft_4s_ease-in-out_infinite]"></i>
                     <h4 className="text-slate-300 font-medium text-sm mb-2 flex items-center gap-2">
-                      <i className="ph-fill ph-robot"></i> Ramalan
-                      Kebolehpasaran (AI)
+                      <i className="ph-fill ph-robot"></i> Ramalan Kebolehpasaran (AI)
                     </h4>
                     <div className="flex items-end gap-2 mb-4">
-                      <span className="text-5xl font-bold">
-                        {employabilityScore}%
-                      </span>
+                      <span className="text-5xl font-bold">{employabilityScore}%</span>
                     </div>
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      {insight.message ||
-                        "Tiada analisis AI tersedia buat masa ini."}
+                      {insight.message || "Tiada analisis AI tersedia buat masa ini."}
                     </p>
                   </div>
 
-                  <div className="border border-gray-100 p-4 rounded-lg">
+                  {/* Radar Chart */}
+                  <div className="border border-gray-100 p-4 rounded-lg animate-[slideUp_0.4s_ease-out_0.15s] anim-fill">
                     <div className="flex justify-between items-center mb-4">
-                      <h4 className="text-sm font-medium text-[#0A1628]">
-                        Analisis Kemahiran (PLO)
-                      </h4>
+                      <h4 className="text-sm font-medium text-[#0A1628]">Analisis Kemahiran (PLO)</h4>
                       {hasZeroScore && (
-                        <div className="text-[10px] text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-200 flex items-center gap-1 font-bold">
-                          <i className="ph-fill ph-info"></i> DATA PLO BELUM
-                          LENGKAP
+                        <div className="text-[10px] text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-200 flex items-center gap-1 font-bold animate-[scaleIn_0.3s_ease-out]">
+                          <i className="ph-fill ph-info"></i> DATA PLO BELUM LENGKAP
                         </div>
                       )}
                     </div>
@@ -452,87 +432,81 @@ export default function StudentProfileClient({ studentId }) {
                         data={radarData}
                         options={{
                           maintainAspectRatio: false,
-                          scales: {
-                            r: {
-                              min: 0,
-                              max: 100,
-                              beginAtZero: true,
-                              ticks: { stepSize: 20 },
-                            },
-                          },
+                          scales: { r: { min: 0, max: 100, beginAtZero: true, ticks: { stepSize: 20 } } },
+                          animation: { duration: 800, easing: 'easeOutQuart' },
                         }}
                       />
                     </div>
                     {hasZeroScore && (
                       <p className="text-xs text-slate-400 italic mt-4">
-                        Skor 0% mungkin disebabkan penilaian PLO belum
-                        direkodkan oleh pensyarah.
+                        Skor 0% mungkin disebabkan penilaian PLO belum direkodkan oleh pensyarah.
                       </p>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="border border-red-100 bg-red-50/50 p-4 rounded-xl">
-                      <div className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold mb-3">
-                        1
+                  {/* Intervention Cards — staggered */}
+                  {isStaff && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="border border-red-100 bg-red-50/50 p-4 rounded-xl hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 animate-[slideUp_0.4s_ease-out_0.2s] anim-fill">
+                        <div className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold mb-3">1</div>
+                        <h5 className="font-bold text-[#0A1628] text-sm mb-1">Kaunseling Kehadiran</h5>
+                        <p className="text-xs text-[#5A6A85] mb-3">Rujuk pelajar ini kepada kaunselor untuk sesi kaunseling kehadiran atau peribadi.</p>
+                        <button
+                          onClick={() => setInterventionModal({ isOpen: true, type: "kaunseling" })}
+                          disabled={!isStaff}
+                          className="w-full text-xs font-bold text-red-600 border border-red-200 bg-white py-2 rounded-lg hover:bg-red-50 hover:shadow-sm transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Rujuk Kaunselor
+                        </button>
                       </div>
-                      <h5 className="font-bold text-[#0A1628] text-sm mb-1">
-                        Kaunseling Kehadiran
-                      </h5>
-                      <p className="text-xs text-[#5A6A85] mb-3">
-                        Kehadiran jatuh bawah 80% pada bulan lepas. Jadualkan
-                        sesi perjumpaan segera.
-                      </p>
-                      <button
-                        onClick={() => alert("Temujanji berjaya dihantar!")}
-                        className="w-full text-xs font-bold text-red-600 border border-red-200 bg-white py-2 rounded-lg hover:bg-red-50 transition"
-                      >
-                        Set Temujanji
-                      </button>
-                    </div>
-                    <div className="border border-orange-100 bg-orange-50/50 p-4 rounded-xl">
-                      <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold mb-3">
-                        2
+
+                      <div className="border border-orange-100 bg-orange-50/50 p-4 rounded-xl hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 animate-[slideUp_0.4s_ease-out_0.3s] anim-fill">
+                        <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold mb-3">2</div>
+                        <h5 className="font-bold text-[#0A1628] text-sm mb-1">Klinik Akademik</h5>
+                        <p className="text-xs text-[#5A6A85] mb-3">Rujuk pelajar ini ke klinik akademik untuk bimbingan subjek lemah.</p>
+                        <button
+                          onClick={() => setInterventionModal({ isOpen: true, type: "klinik" })}
+                          disabled={!isStaff}
+                          className="w-full text-xs font-bold text-orange-600 border border-orange-200 bg-white py-2 rounded-lg hover:bg-orange-50 hover:shadow-sm transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Rujuk Klinik Akademik
+                        </button>
                       </div>
-                      <h5 className="font-bold text-[#0A1628] text-sm mb-1">
-                        Klinik Akademik
-                      </h5>
-                      <p className="text-xs text-[#5A6A85] mb-3">
-                        Markah subjek Programming merosot. Masukkan pelajar
-                        dalam kelas bimbingan tambahan.
-                      </p>
-                      <button
-                        onClick={() => alert("Pendaftaran klinik berjaya!")}
-                        className="w-full text-xs font-bold text-orange-600 border border-orange-200 bg-white py-2 rounded-lg hover:bg-orange-50 transition"
-                      >
-                        Daftar Klinik
-                      </button>
-                    </div>
-                    <div className="border border-blue-100 bg-blue-50/50 p-4 rounded-xl">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mb-3">
-                        3
+
+                      <div className="border border-blue-100 bg-blue-50/50 p-4 rounded-xl hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 animate-[slideUp_0.4s_ease-out_0.4s] anim-fill">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mb-3">3</div>
+                        <h5 className="font-bold text-[#0A1628] text-sm mb-1">Pembangunan Soft Skills</h5>
+                        <p className="text-xs text-[#5A6A85] mb-3">Rujuk pelajar ini untuk latihan komunikasi, kepimpinan dan soft skills.</p>
+                        <button
+                          onClick={() => setInterventionModal({ isOpen: true, type: "softskills" })}
+                          disabled={!isStaff}
+                          className="w-full text-xs font-bold text-blue-600 border border-blue-200 bg-white py-2 rounded-lg hover:bg-blue-50 hover:shadow-sm transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Rujuk Soft Skills
+                        </button>
                       </div>
-                      <h5 className="font-bold text-[#0A1628] text-sm mb-1">
-                        Pembangunan Soft Skills
-                      </h5>
-                      <p className="text-xs text-[#5A6A85] mb-3">
-                        Kemahiran komunikasi memuaskan. Tingkatkan melalui kem
-                        kepimpinan.
-                      </p>
-                      <button
-                        onClick={() => alert("Senarai program dipaparkan!")}
-                        className="w-full text-xs font-bold text-blue-600 border border-blue-200 bg-white py-2 rounded-lg hover:bg-blue-50 transition"
-                      >
-                        Lihat Program
-                      </button>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Modals (unchanged) */}
+      <ReportFormModal
+        isOpen={interventionModal.isOpen}
+        onClose={() => setInterventionModal({ isOpen: false, type: null })}
+        student={student}
+        interventionType={interventionModal.type}
+      />
+      <GenerateReportModal
+        isOpen={generateReportOpen}
+        onClose={() => setGenerateReportOpen(false)}
+        student={student}
+        skillGap={skillGap}
+      />
     </div>
   );
 }

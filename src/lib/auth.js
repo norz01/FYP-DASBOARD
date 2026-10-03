@@ -22,5 +22,5 @@ export async function getToken() {
 }
 
 export function getDashboardPathForRole(role) {
-  return role === 'admin' ? '/staff-dashboard' : '/student-dashboard';
+  return role === 'admin' || role === 'counselor' ? '/staff-dashboard' : '/student-dashboard';
 }

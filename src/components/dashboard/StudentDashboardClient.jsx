@@ -15,6 +15,7 @@ import {
 import { Radar } from "react-chartjs-2";
 import Sidebar from "../Sidebar";
 import JobCard from "../JobCard";
+import MergedLaporanTab from "./MergedLaporanTab";
 import { calculateEmployability } from "@/lib/heuristics";
 
 ChartJS.register(
@@ -432,6 +433,7 @@ export default function StudentDashboardClient() {
   const navItems = [
     { id: "dashboard", icon: "ph-user-circle", label: "Profil & Prestasi" },
     { id: "profile", icon: "ph-pencil-line", label: "Kemaskini Sijil Saya" },
+    { id: "reports", icon: "ph-tray", label: "Laporan & Temujanji" },
     { id: "career", icon: "ph-briefcase", label: "Padanan Kerjaya (AI)" },
     { id: "courses", icon: "ph-certificate", label: "Kursus Cadangan" },
   ];
@@ -836,6 +838,13 @@ export default function StudentDashboardClient() {
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* TAB: REPORTS / LAPORAN & TEMUJANJI */}
+          {activeTab === "reports" && (
+            <div className="animate-[fadeIn_0.3s_ease-in-out]">
+              <MergedLaporanTab user={user} />
             </div>
           )}
 

@@ -17,6 +17,7 @@ import Sidebar from "../Sidebar";
 import KpiCard from "../KpiCard";
 import StudentModal from "../StudentModal";
 import StudentListGrid from "../StudentListGrid";
+import CounselorDashboardClient from "./CounselorDashboardClient";
 import { calculateEmployability, calculateTopPerformerScore } from "@/lib/heuristics";
 
 ChartJS.register(
@@ -80,15 +81,23 @@ export default function StaffDashboardClient() {
     setUser(u);
 
     const t = getClientToken();
+
     if (t) {
       fetch("/api/students", { headers: { Authorization: `Bearer ${t}` } })
         .then((res) => res.json())
         .then((data) => setStudents(data))
         .catch((err) => console.error("Fetch students error:", err))
         .finally(() => setIsLoading(false));
-      fetchMdbFiles(true);
+
+      // MDB management is admin-only
+      if (u?.role === "admin") {
+        fetchMdbFiles(true);
+      } else {
+        setIsLoadingFiles(false);
+      }
     } else {
       setIsLoading(false);
+      setIsLoadingFiles(false);
     }
   }, []);
 
@@ -472,14 +481,20 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
     }
   };
 
-  const navItems = [
+  const adminNavItems = [
     { id: "overview", icon: "ph-squares-four", label: "Dashboard Overview" },
     { id: "prediction", icon: "ph-magic-wand", label: "AI Prediction" },
     { id: "skills", icon: "ph-chart-bar", label: "Skills Gap Analysis" },
     { id: "pathways", icon: "ph-path", label: "Learning Pathways" },
     { id: "management", icon: "ph-users-three", label: "Student Management" },
+    { id: "counselor", icon: "ph-heart-half", label: "Kaunseling & Intervensi" },
     { id: "data", icon: "ph-database", label: "Pengurusan Data" },
   ];
+
+  // Counselor dapat semua tab KECUALI 'data'
+  const navItems = user?.role === "counselor" 
+    ? adminNavItems.filter(item => item.id !== "data") 
+    : adminNavItems;
 
   if (isLoading || !user) {
     return <div className="h-screen flex items-center justify-center text-slate-500">Memuatkan Dashboard...</div>;
@@ -550,6 +565,7 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                   iconColor="text-blue-600"
                   barColor="bg-blue-600"
                   barWidth={100}
+                  delay={0}
                 />
                 <KpiCard
                   title="Purata Kebolehpasaran"
@@ -560,6 +576,7 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                   iconColor="text-green-600"
                   barColor="bg-green-500"
                   barWidth={averageEmployability}
+                  delay={100}
                 />
                 <KpiCard
                   title="Pelajar Berisiko Tinggi"
@@ -572,10 +589,11 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                   barWidth={
                     totalStudents ? (highRiskCount / totalStudents) * 100 : 0
                   }
+                  delay={200}
                 />
               </div>
 
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 animate-[slideUp_0.4s_ease-out_0.2s] anim-fill">
                 <h3 className="font-bold text-lg text-slate-800 mb-6">
                   Purata Pencapaian PLO vs Sasaran
                 </h3>
@@ -586,22 +604,24 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                       responsive: true,
                       maintainAspectRatio: false,
                       scales: { y: { beginAtZero: true, max: 100 } },
+                      animation: { duration: 800, easing: 'easeOutQuart' },
                     }}
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 animate-[slideUp_0.4s_ease-out_0.3s] anim-fill">
                   <h3 className="font-bold text-lg text-red-600 mb-4">
                     Pelajar Berisiko Tinggi
                   </h3>
                   <div className="space-y-4">
-                    {highRiskStudents.slice(0, 5).map((s) => (
+                    {highRiskStudents.slice(0, 5).map((s, idx) => (
                       <div
                         key={s.id}
                         onClick={() => handleNavigate(`/student-profile?id=${s.id}`)}
-                        className="bg-red-50 p-4 rounded-xl border border-red-100 cursor-pointer hover:bg-red-100 flex justify-between items-center"
+                        className="bg-red-50 p-4 rounded-xl border border-red-100 cursor-pointer hover:bg-red-100 hover:shadow-sm hover:translate-x-1 flex justify-between items-center transition-all duration-200 animate-[slideUp_0.3s_ease-out] anim-fill"
+                        style={{ animationDelay: `${350 + idx * 60}ms` }}
                       >
                         <div>
                           <h4 className="font-bold text-slate-800">{s.nama}</h4>
@@ -613,20 +633,21 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                               : "🤖 AI: Risiko Tinggi"}
                           </p>
                         </div>
-                        <i className="ph ph-caret-right text-red-400"></i>
+                        <i className="ph ph-caret-right text-red-400 transition-transform duration-200 group-hover:translate-x-1"></i>
                       </div>
                     ))}
                   </div>
                 </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 animate-[slideUp_0.4s_ease-out_0.35s] anim-fill">
                   <h3 className="font-bold text-lg text-yellow-600 mb-4">
                     Top Performers
                   </h3>
                   <div className="space-y-4">
-                    {topPerformers.map((s) => (
+                    {topPerformers.map((s, idx) => (
                       <div
                         key={s.id}
-                        className="bg-yellow-50 p-4 rounded-xl border border-yellow-100 flex justify-between items-center cursor-pointer hover:bg-yellow-100"
+                        className="bg-yellow-50 p-4 rounded-xl border border-yellow-100 flex justify-between items-center cursor-pointer hover:bg-yellow-100 hover:shadow-sm hover:translate-x-1 transition-all duration-200 animate-[slideUp_0.3s_ease-out] anim-fill"
+                        style={{ animationDelay: `${400 + idx * 60}ms` }}
                         onClick={() => handleNavigate(`/student-profile?id=${s.id}`)}
                       >
                         <div>
@@ -638,10 +659,10 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                               : `Sijil: ${s.certification}`}
                           </p>
                         </div>
-<span className="text-xl font-bold text-yellow-600">
-                           {calculateTopPerformerScore(s.cgpa, s.attendance)}
-                           %
-                         </span>
+                        <span className="text-xl font-bold text-yellow-600">
+                          {calculateTopPerformerScore(s.cgpa, s.attendance)}
+                          %
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -651,20 +672,20 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
           )}
 
           {activeTab === "prediction" && (
-  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[75vh]">
+  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[75vh] animate-[fadeIn_0.3s_ease-in-out]">
 
-    {/* --- LEFT PANEL: CONTEXT & CONTROLS --- */}
-    <div className="lg:col-span-1 flex flex-col gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm overflow-y-auto">
+    {/* --- LEFT PANEL: slides in from left --- */}
+    <div className="lg:col-span-1 flex flex-col gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm overflow-y-auto animate-[slideInLeft_0.4s_ease-out] anim-fill">
       <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
         <i className="ph ph-user-circle-gear text-2xl text-emerald-600"></i>
         Konteks Pelajar
       </h3>
 
       {/* Student Selector */}
-      <div>
+      <div className="animate-[slideUp_0.4s_ease-out_0.1s] anim-fill">
         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Pilih Pelajar</label>
         <select
-          className="w-full p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+          className="w-full p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-shadow duration-200"
           value={aiStudentId}
           onChange={(e) => {
             const id = e.target.value;
@@ -686,12 +707,11 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
         </select>
       </div>
 
-      {/* Context Card (Visible only when student is selected) */}
+      {/* Context Card */}
       {aiStudentId && (() => {
         const selected = students.find((s) => s.id === aiStudentId);
         if (!selected) return null;
 
-        // Find weakest PLO for context
         const plos = [
           { name: "PLO 1", val: selected.plo1 }, { name: "PLO 2", val: selected.plo2 },
           { name: "PLO 3", val: selected.plo3 }, { name: "PLO 4", val: selected.plo4 },
@@ -700,10 +720,10 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
           { name: "PLO 9", val: selected.plo9 },
         ];
         const weakest = plos.reduce((min, curr) => (curr.val < min.val ? curr : min), plos[0]);
-        const hasWeakness = weakest.val < 80; // Target is 80%
+        const hasWeakness = weakest.val < 80;
 
         return (
-          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-sm space-y-3">
+          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-sm space-y-3 animate-[scaleIn_0.3s_ease-out]">
             <div className="flex justify-between items-center">
               <span className="font-bold text-slate-800">{selected.nama}</span>
               <span className={`px-2 py-0.5 rounded text-xs font-bold ${
@@ -735,27 +755,27 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
       })()}
 
       {/* Quick Prompts */}
-      <div className="mt-auto pt-4 border-t border-slate-100">
+      <div className="mt-auto pt-4 border-t border-slate-100 animate-[slideUp_0.4s_ease-out_0.2s] anim-fill">
         <p className="text-xs font-bold text-slate-500 mb-2 uppercase">Soalan Pantas:</p>
         <div className="flex flex-col gap-2">
           <button
             onClick={() => handleSendAiMessage("Sila analisis kelemahan utama pelajar ini dan cadangkan intervensi.")}
             disabled={!aiStudentId}
-            className="text-left text-xs p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded border border-emerald-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="text-left text-xs p-2 bg-emerald-50 hover:bg-emerald-100 hover:shadow-sm text-emerald-800 rounded border border-emerald-200 transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             🔍 Analisis kelemahan & intervensi
           </button>
           <button
             onClick={() => handleSendAiMessage("Apakah sijil profesional yang paling sesuai untuk pelajar ini berdasarkan PLO mereka?")}
             disabled={!aiStudentId}
-            className="text-left text-xs p-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded border border-blue-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="text-left text-xs p-2 bg-blue-50 hover:bg-blue-100 hover:shadow-sm text-blue-800 rounded border border-blue-200 transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             🎓 Cadangan sijil profesional
           </button>
           <button
             onClick={() => handleSendAiMessage("Bagaimana prestasi akademik pelajar ini berbanding purata?")}
             disabled={!aiStudentId}
-            className="text-left text-xs p-2 bg-purple-50 hover:bg-purple-100 text-purple-800 rounded border border-purple-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="text-left text-xs p-2 bg-purple-50 hover:bg-purple-100 hover:shadow-sm text-purple-800 rounded border border-purple-200 transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             📊 Ringkasan prestasi akademik
           </button>
@@ -763,12 +783,12 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
       </div>
     </div>
 
-    {/* --- RIGHT PANEL: CHAT INTERFACE --- */}
-    <div className="lg:col-span-2 flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    {/* --- RIGHT PANEL: CHAT — slides in from right --- */}
+    <div className="lg:col-span-2 flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden animate-[slideInRight_0.4s_ease-out] anim-fill">
 
       {/* Chat Header */}
       <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
+        <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center animate-[floatSoft_3s_ease-in-out_infinite]">
           <i className="ph-fill ph-sparkle text-xl text-emerald-600"></i>
         </div>
         <div>
@@ -780,21 +800,24 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
       {/* Message Area */}
       <div className="flex-1 p-6 overflow-y-auto bg-slate-50/30 space-y-4">
         {aiMessages.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center text-center text-slate-400">
-            <i className="ph ph-chats-circle text-5xl mb-3 opacity-20"></i>
+          <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 animate-[fadeIn_0.5s_ease-out]">
+            <i className="ph ph-chats-circle text-5xl mb-3 opacity-20 animate-[floatSoft_4s_ease-in-out_infinite]"></i>
             <p className="text-sm">Pilih pelajar di sebelah kiri dan mulakan perbualan.</p>
           </div>
         )}
 
         {aiMessages.map((msg, idx) => (
-          <div key={idx} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+          <div
+            key={idx}
+            className={`flex gap-3 animate-[slideUp_0.3s_ease-out] anim-fill ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+          >
             {msg.role === "model" && (
               <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
                 <i className="ph-fill ph-sparkle text-emerald-600"></i>
               </div>
             )}
 
-            <div className={`max-w-[80%] p-3 rounded-xl shadow-sm whitespace-pre-wrap ${
+            <div className={`max-w-[80%] p-3 rounded-xl shadow-sm whitespace-pre-wrap transition-shadow duration-200 hover:shadow-md ${
               msg.role === "user"
                 ? "bg-emerald-600 text-white rounded-tr-none"
                 : "bg-white border border-slate-200 text-slate-800 rounded-tl-none"
@@ -802,7 +825,6 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
               {msg.role === "model" ? (
                 <>
                   {msg.text ? renderAiText(msg.text) : null}
-                  {/* Waiting for first token: animated dots inside the bubble */}
                   {msg.streaming && !msg.text && (
                     <span className="flex gap-1 items-center h-5">
                       <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"></span>
@@ -810,7 +832,6 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                       <span className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
                     </span>
                   )}
-                  {/* Blinking caret while tokens stream in */}
                   {msg.streaming && msg.text && (
                     <span className="inline-block w-2 h-4 ml-1 bg-emerald-500 animate-pulse align-middle"></span>
                   )}
@@ -836,7 +857,7 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
         <div className="flex gap-2">
           <textarea
             rows="1"
-            className="flex-1 p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none resize-none text-sm"
+            className="flex-1 p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none resize-none text-sm transition-shadow duration-200"
             placeholder={aiStudentId ? "Tanya sesuatu tentang pelajar ini..." : "Sila pilih pelajar dahulu..."}
             value={aiInput}
             onChange={(e) => setAiInput(e.target.value)}
@@ -851,7 +872,7 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
           <button
             onClick={() => handleSendAiMessage()}
             disabled={!aiStudentId || !aiInput.trim() || isAiTyping}
-            className="px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg hover:shadow-emerald-600/20 text-white rounded-xl transition-all duration-200 active:scale-95 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isAiTyping ? (
               <i className="ph ph-spinner-gap animate-spin text-xl"></i>
@@ -869,11 +890,11 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
 )}
 
           {activeTab === "skills" && (
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-slate-900">
+            <div className="space-y-6 animate-[fadeIn_0.3s_ease-in-out]">
+              <h2 className="text-2xl font-bold text-slate-900 animate-[slideUp_0.4s_ease-out]">
                 Skills Gap Analysis
               </h2>
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden animate-[slideUp_0.4s_ease-out_0.1s] anim-fill">
                 <table className="w-full text-left">
                   <thead className="bg-slate-50 border-b">
                     <tr>
@@ -892,8 +913,12 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {skillsGapData.map((s) => (
-                      <tr key={s.plo} className="hover:bg-slate-50">
+                    {skillsGapData.map((s, idx) => (
+                      <tr
+                        key={s.plo}
+                        className="hover:bg-slate-50 transition-colors duration-200 animate-[slideUp_0.3s_ease-out] anim-fill"
+                        style={{ animationDelay: `${150 + idx * 40}ms` }}
+                      >
                         <td className="px-6 py-4 font-medium">{s.plo}</td>
                         <td className="px-6 py-4">{s.average}%</td>
                         <td className="px-6 py-4">
@@ -919,15 +944,16 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
           )}
 
           {activeTab === "pathways" && (
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-slate-900">
+            <div className="space-y-6 animate-[fadeIn_0.3s_ease-in-out]">
+              <h2 className="text-2xl font-bold text-slate-900 animate-[slideUp_0.4s_ease-out]">
                 Learning Pathways
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {recommendedPathways.map((s) => (
+                {recommendedPathways.map((s, idx) => (
                   <div
                     key={s.plo}
-                    className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100"
+                    className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md hover:-translate-y-1 transition-all duration-300 animate-[slideUp_0.4s_ease-out] anim-fill"
+                    style={{ animationDelay: `${100 + idx * 80}ms` }}
                   >
                     <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded-md mb-4 inline-block">
                       Jurang: {s.gap}%
@@ -945,23 +971,32 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
           )}
 
           {activeTab === "management" && (
-            <StudentListGrid
-              students={students}
-              onViewProfile={(id) => handleNavigate(`/student-profile?id=${id}`)}
-              onAddStudent={() => {
-                setEditingStudent(null);
-                setFormData({
-                  ID_Pelajar: "",
-                  Nama: "",
-                  Kehadiran_Pct: "",
-                  CGPA: "",
-                  Sijil_Profesional: "Tiada",
-                  Kursus: "DFK",
-                  Status_Pelajar: "Sederhana",
-                });
-                setIsModalOpen(true);
-              }}
-            />
+            <div className="animate-[fadeIn_0.3s_ease-in-out]">
+              <StudentListGrid
+                students={students}
+                onViewProfile={(id) => handleNavigate(`/student-profile?id=${id}`)}
+                onAddStudent={() => {
+                  setEditingStudent(null);
+                  setFormData({
+                    ID_Pelajar: "",
+                    Nama: "",
+                    Kehadiran_Pct: "",
+                    CGPA: "",
+                    Sijil_Profesional: "Tiada",
+                    Kursus: "DFK",
+                    Status_Pelajar: "Sederhana",
+                  });
+                  setIsModalOpen(true);
+                }}
+                readOnly={false}
+              />
+            </div>
+          )}
+
+          {activeTab === "counselor" && (
+            <div className="animate-[fadeIn_0.3s_ease-in-out]">
+              <CounselorDashboardClient currentUser={user} />
+            </div>
           )}
 
           {activeTab === "data" && (

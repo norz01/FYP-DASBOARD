@@ -2,9 +2,191 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Letak custom base styles di sini jika perlu */
+/* ═══════════════════════════════════════════════════════
+   ANIMATION KEYFRAMES — TVETMARA Dashboard Motion System
+   ═══════════════════════════════════════════════════════ */
 
+/* Page & tab entrance (existing) */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Slide from left (login brand panel, sidebar items) */
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-32px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Slide from right (login form panel) */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(32px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Rise up from below (cards, KPIs, chat bubbles) */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Scale pop-in (modals, badges, avatars) */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Gentle float for decorative elements */
+@keyframes floatSoft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+/* Shimmer for skeleton loaders (upgrade from plain pulse) */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   UTILITY CLASSES
+   ═══════════════════════════════════════════════════════ */
+
+@layer utilities {
+  /* Stagger delay helpers (use with any animation) */
+  .stagger-1 {
+    animation-delay: 50ms;
+  }
+  .stagger-2 {
+    animation-delay: 100ms;
+  }
+  .stagger-3 {
+    animation-delay: 150ms;
+  }
+  .stagger-4 {
+    animation-delay: 200ms;
+  }
+  .stagger-5 {
+    animation-delay: 250ms;
+  }
+  .stagger-6 {
+    animation-delay: 300ms;
+  }
+  .stagger-7 {
+    animation-delay: 350ms;
+  }
+  .stagger-8 {
+    animation-delay: 400ms;
+  }
+
+  /* Fill mode so elements stay invisible before delay kicks in */
+  .anim-fill {
+    animation-fill-mode: both;
+  }
+
+  /* Shimmer skeleton upgrade */
+  .skeleton-shimmer {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     MOBILE-FIRST RESPONSIVE UTILITIES
+     ═══════════════════════════════════════════════════════ */
+
+  /* Touch-friendly minimum sizes (44px = Apple HIG standard) */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Responsive font sizes using clamp() */
+  .text-responsive-sm {
+    font-size: clamp(0.875rem, 0.8rem + 0.2vw, 1rem);
+  }
+
+  .text-responsive-base {
+    font-size: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+  }
+
+  .text-responsive-lg {
+    font-size: clamp(1.125rem, 1rem + 0.5vw, 1.5rem);
+  }
+
+  .text-responsive-xl {
+    font-size: clamp(1.25rem, 1.1rem + 0.75vw, 1.875rem);
+  }
+
+  .text-responsive-2xl {
+    font-size: clamp(1.5rem, 1.25rem + 1vw, 2.25rem);
+  }
+
+  /* Prevent text selection on touch elements */
+  .no-select {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Smooth scrolling for mobile */
+  .scroll-smooth-mobile {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Safe area insets for notched phones (iPhone notch/home indicator) */
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Safe area padding bottom utility for sticky footers */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
