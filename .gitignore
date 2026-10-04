@@ -4,7 +4,7 @@
 # Node modules (Jangan push folder ni, sebab dia besar dan boleh recreate guna npm install)
 node_modules/
 backend/node_modules/
-
+backend/uploads/
 # Build output (Boleh recreate guna npm run build)
 dist/
 mongodb_data/
@@ -16,7 +16,6 @@ db/Ekspot_Senat.mdb
 db/JD2025.mdb
 db/JJ2025.mdb
 db/JJ2026.mdb
-backend/uploads/
 
 # Log files
 server.log
