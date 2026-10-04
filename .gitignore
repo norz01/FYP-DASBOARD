@@ -16,6 +16,7 @@ db/Ekspot_Senat.mdb
 db/JD2025.mdb
 db/JJ2025.mdb
 db/JJ2026.mdb
+backend/uploads
 
 # Log files
 server.log
