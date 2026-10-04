@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useFilePreview } from '@/lib/use-file-preview';
 import AttachmentPreview from './ui/AttachmentPreview';
 
@@ -10,19 +10,25 @@ export default function GenerateReportModal({ isOpen, onClose, student, skillGap
 
   const { file, previewUrl, error: fileError, selectFile, clear: clearFile } = useFilePreview({ acceptTypes: ['pdf'] });
 
+  // Track open->closed transition, reset only once on open
+  const prevIsOpenRef = useRef(false);
+
   useEffect(() => {
-    if (isOpen && student) {
+    // Only run initialization when modal transitions closed -> open
+    if (isOpen && !prevIsOpenRef.current) {
       document.body.style.overflow = 'hidden';
-      setTitle(`Laporan Prestasi & Intervensi: ${student.nama}`);
+      setTitle(student ? `Laporan Prestasi & Intervensi: ${student.nama}` : '');
       setMessage('');
       clearFile();
       setToast(null);
-    } else {
+    }
+    // Clean up when transitions open -> closed
+    else if (!isOpen && prevIsOpenRef.current) {
       document.body.style.overflow = '';
     }
-    return () => {
-      document.body.style.overflow = '';
-    };
+
+    // Update ref for next render
+    prevIsOpenRef.current = isOpen;
   }, [isOpen, student, clearFile]);
 
   if (!isOpen || !student) return null;

@@ -260,8 +260,12 @@ export default function StudentProfileClient({ studentId }) {
             </div>
 
             <div className="px-6 pb-6 -mt-12 text-center">
-              <div className="w-24 h-24 mx-auto rounded-full bg-[#1251AA] text-white text-4xl font-bold flex items-center justify-center border-4 border-white mb-3 animate-[scaleIn_0.4s_ease-out_0.3s] anim-fill">
-                {student.nama?.charAt(0) || "?"}
+              <div className="w-24 h-24 mx-auto rounded-full bg-[#1251AA] text-white text-4xl font-bold flex items-center justify-center border-4 border-white mb-3 animate-[scaleIn_0.4s_ease-out_0.3s] anim-fill overflow-hidden">
+                {student.profileImage ? (
+                  <img src={student.profileImage} alt={student.nama} className="w-full h-full object-cover" />
+                ) : (
+                  student.nama?.charAt(0) || "?"
+                )}
               </div>
               <h2 className="text-lg font-bold text-[#0A1628]">{student.nama || "Nama Tidak Diketahui"}</h2>
               <p className="text-sm text-[#5A6A85] font-mono">{student.id}</p>

@@ -11,6 +11,7 @@ export default function Sidebar({
   setIsSidebarOpen,
   currentUser,
   handleLogout,
+  profileImage = null,
 }) {
   const displayName = currentUser?.displayName || "User IKMB";
   const roleLabel = getRoleLabel(currentUser?.role);
@@ -111,8 +112,16 @@ export default function Sidebar({
         <div className="p-3 md:p-4 border-t border-slate-100 bg-slate-50/50 safe-area-bottom">
           <div className="flex items-center justify-between p-2 md:p-3 rounded-xl bg-white border border-slate-200 shadow-sm">
             <div className="flex items-center gap-2 md:gap-3 overflow-hidden flex-1">
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-blue-600 flex justify-center items-center text-white font-bold text-xs md:text-sm shrink-0">
-                {userInitials}
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-blue-600 flex justify-center items-center text-white font-bold text-xs md:text-sm shrink-0 overflow-hidden">
+                {profileImage ? (
+                  <img
+                    src={profileImage}
+                    alt={displayName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  userInitials
+                )}
               </div>
               <div className="flex flex-col flex-1 min-w-0">
                 <p className="text-xs md:text-sm font-bold text-slate-800 truncate">

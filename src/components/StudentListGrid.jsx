@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useMemo } from "react";
+import { RiskBadge, getRiskMeta } from "./ui/dashboard-kit";
 
 const courseMap = {
   ITW: "Diploma Kimpalan",
@@ -19,6 +20,7 @@ export default function StudentListGrid({
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("Semua");
+  const [riskFilter, setRiskFilter] = useState("Semua");
 
   const filteredStudents = useMemo(() => {
     return students.filter((s) => {
@@ -26,9 +28,25 @@ export default function StudentListGrid({
         s.nama?.toLowerCase().includes(search.toLowerCase()) ||
         s.id?.toLowerCase().includes(search.toLowerCase());
       const matchFilter = filter === "Semua" || s.kursus === filter;
-      return matchSearch && matchFilter;
+      const matchRisk =
+        riskFilter === "Semua" ||
+        getRiskMeta(s.dropoutRisk).level === riskFilter;
+      return matchSearch && matchFilter && matchRisk;
     });
-  }, [students, search, filter]);
+  }, [students, search, filter, riskFilter]);
+
+  const riskChips = [
+    { id: "Semua", label: "Semua Risiko", dot: "bg-slate-400" },
+    { id: "Tinggi", label: "Risiko Tinggi", dot: "bg-red-500" },
+    { id: "Sederhana", label: "Risiko Sederhana", dot: "bg-amber-500" },
+    { id: "Rendah", label: "Risiko Rendah", dot: "bg-emerald-500" },
+  ].map((r) => ({
+    ...r,
+    count:
+      r.id === "Semua"
+        ? students.length
+        : students.filter((s) => getRiskMeta(s.dropoutRisk).level === r.id).length,
+  }));
 
   const filters = ["Semua", "ITW", "DFK", "DGA", "SLR", "DCG", "SED", "PPU"];
 
@@ -84,6 +102,27 @@ export default function StudentListGrid({
         ))}
       </div>
 
+      {/* Risk Category Chips */}
+      <div className="flex gap-2 overflow-x-auto pb-2 animate-[slideUp_0.4s_ease-out_0.15s] anim-fill">
+        {riskChips.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => setRiskFilter(r.id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border transition-all duration-200 active:scale-95 ${
+              riskFilter === r.id
+                ? "bg-[#0C2461] text-white border-[#0C2461] shadow-md shadow-[#0C2461]/20"
+                : "bg-white text-[#5A6A85] border-[rgba(18,81,170,0.13)] hover:bg-gray-50"
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${r.dot}`}></span>
+            {r.label}
+            <span className={`px-1.5 rounded-full text-[10px] ${riskFilter === r.id ? "bg-white/20" : "bg-slate-100"}`}>
+              {r.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* Student Grid — staggered entrance */}
       {filteredStudents.length === 0 ? (
         <div className="bg-white border border-[rgba(18,81,170,0.13)] rounded-xl p-12 text-center animate-[scaleIn_0.3s_ease-out]">
@@ -111,8 +150,12 @@ export default function StudentListGrid({
                 </span>
               </div>
 
-              <div className="absolute top-8 left-1/2 -translate-x-1/2 w-24 h-24 rounded-full bg-[#1251AA] text-white text-3xl font-bold flex items-center justify-center border-4 border-white shadow-md z-10 transition-transform duration-300 group-hover:scale-105">
-                {student.nama?.charAt(0)}
+              <div className="absolute top-8 left-1/2 -translate-x-1/2 w-24 h-24 rounded-full bg-[#1251AA] text-white text-3xl font-bold flex items-center justify-center border-4 border-white shadow-md z-10 transition-transform duration-300 group-hover:scale-105 overflow-hidden">
+                {student.profileImage ? (
+                  <img src={student.profileImage} alt={student.nama} className="w-full h-full object-cover" />
+                ) : (
+                  student.nama?.charAt(0)
+                )}
               </div>
 
               <div className="pt-14 pb-5 px-5 flex flex-col items-center text-center">
@@ -122,6 +165,9 @@ export default function StudentListGrid({
                 <p className="text-xs text-[#5A6A85] mt-1">
                   {courseMap[student.kursus] || student.kursus}
                 </p>
+                <div className="mt-2 flex justify-center">
+                  <RiskBadge risk={student.dropoutRisk} />
+                </div>
 
                 <div className="mt-3 w-full pt-3 border-t border-[rgba(18,81,170,0.13)] flex justify-between items-center text-xs">
                   <div className="text-left">

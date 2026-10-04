@@ -18,6 +18,7 @@ import KpiCard from "../KpiCard";
 import StudentModal from "../StudentModal";
 import StudentListGrid from "../StudentListGrid";
 import CounselorDashboardClient from "./CounselorDashboardClient";
+import { RiskBadge, getRiskMeta } from "../ui/dashboard-kit";
 import { calculateEmployability, calculateTopPerformerScore } from "@/lib/heuristics";
 
 ChartJS.register(
@@ -66,6 +67,11 @@ export default function StaffDashboardClient() {
   const [aiInput, setAiInput] = useState("");
   const [isAiTyping, setIsAiTyping] = useState(false);
   const chatEndRef = useRef(null); // For auto-scrolling
+// AI SELECTOR: search + risk category filter
+  const [aiSearch, setAiSearch] = useState("");
+  const [isAiDropdownOpen, setIsAiDropdownOpen] = useState(false);
+  const [aiRiskFilter, setAiRiskFilter] = useState("Semua");
+  const aiSelectorRef = useRef(null);
 
   const [mdbFile, setMdbFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -105,6 +111,23 @@ export default function StaffDashboardClient() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [aiMessages]);
+// Close student dropdown on outside click / Escape
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (aiSelectorRef.current && !aiSelectorRef.current.contains(e.target)) {
+        setIsAiDropdownOpen(false);
+      }
+    };
+    const handleEscape = (e) => {
+      if (e.key === "Escape") setIsAiDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
 
   const fetchMdbFiles = async (showLoader = false) => {
     const t = getClientToken();
@@ -276,6 +299,48 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
       (student.kursus || "").toLowerCase().includes(query)
     );
   });
+
+// ─── AI PREDICTION: searchable selector helpers ───
+  const aiRiskCounts = students.reduce(
+    (acc, s) => {
+      const level = getRiskMeta(s.dropoutRisk).level;
+      acc[level] = (acc[level] || 0) + 1;
+      return acc;
+    },
+    { Tinggi: 0, Sederhana: 0, Rendah: 0 },
+  );
+
+  const aiFilteredStudents = students.filter((s) => {
+    const q = aiSearch.toLowerCase();
+    const matchQuery =
+      !q ||
+      (s.nama || "").toLowerCase().includes(q) ||
+      (s.id || "").toString().toLowerCase().includes(q) ||
+      (s.kursus || "").toLowerCase().includes(q);
+    const matchRisk =
+      aiRiskFilter === "Semua" ||
+      getRiskMeta(s.dropoutRisk).level === aiRiskFilter;
+    return matchQuery && matchRisk;
+  });
+
+  const selectAiStudent = (id) => {
+    setAiStudentId(id);
+    setIsAiDropdownOpen(false);
+    const s = students.find((x) => x.id === id);
+    setAiSearch(s ? `${s.nama} (${s.id})` : "");
+    setAiMessages(
+      id && s
+        ? [{ role: "model", welcome: true, text: `Salam! Profil **${s.nama}** (${s.kursus}) telah dimuatkan sebagai konteks. Sila ajukan soalan atau gunakan Soalan Pantas di bawah.` }]
+        : [],
+    );
+  };
+
+  const clearAiSelection = () => {
+    setAiStudentId("");
+    setAiSearch("");
+    setAiMessages([]);
+    setIsAiDropdownOpen(false);
+  };
 
   const handleInputChange = (e) =>
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -681,30 +746,113 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
         Konteks Pelajar
       </h3>
 
-      {/* Student Selector */}
-      <div className="animate-[slideUp_0.4s_ease-out_0.1s] anim-fill">
-        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Pilih Pelajar</label>
-        <select
-          className="w-full p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-shadow duration-200"
-          value={aiStudentId}
-          onChange={(e) => {
-            const id = e.target.value;
-            setAiStudentId(id);
-            const s = students.find((x) => x.id === id);
-            setAiMessages(
-              id && s
-                ? [{ role: "model", welcome: true, text: `Salam! Profil **${s.nama}** (${s.kursus}) telah dimuatkan sebagai konteks. Sila ajukan soalan atau gunakan Soalan Pantas di bawah.` }]
-                : []
+      {/* Student Selector — searchable combobox with risk categories */}
+      <div className="animate-[slideUp_0.4s_ease-out_0.1s] anim-fill" ref={aiSelectorRef}>
+        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
+          Cari & Pilih Pelajar
+        </label>
+
+        {/* Search input */}
+        <div className="relative">
+          <i className="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg pointer-events-none"></i>
+          <input
+            type="text"
+            value={aiSearch}
+            onChange={(e) => {
+              setAiSearch(e.target.value);
+              setIsAiDropdownOpen(true);
+            }}
+            onFocus={() => setIsAiDropdownOpen(true)}
+            placeholder="Cari nama, ID atau kursus..."
+            className="w-full p-2.5 pl-9 pr-9 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-shadow duration-200"
+          />
+          {aiStudentId && (
+            <button
+              type="button"
+              onClick={clearAiSelection}
+              title="Kosongkan pilihan"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 transition"
+            >
+              <i className="ph-bold ph-x-circle text-lg"></i>
+            </button>
+          )}
+        </div>
+
+        {/* Risk category filter chips (Tinggi / Sederhana / Rendah) */}
+        <div className="flex gap-1.5 mt-2 flex-wrap">
+          {["Semua", "Tinggi", "Sederhana", "Rendah"].map((level) => {
+            const active = aiRiskFilter === level;
+            const count =
+              level === "Semua" ? students.length : aiRiskCounts[level] || 0;
+            const dot =
+              level === "Tinggi"
+                ? "bg-red-500"
+                : level === "Sederhana"
+                  ? "bg-amber-500"
+                  : level === "Rendah"
+                    ? "bg-emerald-500"
+                    : "bg-slate-400";
+            return (
+              <button
+                key={level}
+                type="button"
+                onClick={() => {
+                  setAiRiskFilter(level);
+                  setIsAiDropdownOpen(true);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all duration-200 active:scale-95 ${
+                  active
+                    ? "bg-slate-800 text-white border-slate-800 shadow-sm"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${dot}`}></span>
+                {level}
+                <span className={`px-1 rounded-full ${active ? "bg-white/20" : "bg-slate-100"}`}>
+                  {count}
+                </span>
+              </button>
             );
-          }}
-        >
-          <option value="">-- Sila Pilih Pelajar --</option>
-          {students.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.nama} ({s.id})
-            </option>
-          ))}
-        </select>
+          })}
+        </div>
+
+        {/* Dropdown results with risk badges */}
+        {isAiDropdownOpen && (
+          <div className="mt-2 bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 overflow-y-auto scroll-smooth-mobile animate-[fadeIn_0.2s_ease-out]">
+            {aiFilteredStudents.length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400">
+                <i className="ph ph-smiley-sad text-2xl block mb-1"></i>
+                Tiada pelajar sepadan carian.
+              </div>
+            ) : (
+              aiFilteredStudents.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => selectAiStudent(s.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors duration-150 border-b border-slate-50 last:border-b-0 ${
+                    s.id === aiStudentId ? "bg-emerald-50" : "hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 font-bold text-xs flex items-center justify-center overflow-hidden shrink-0">
+                    {s.profileImage ? (
+                      <img src={s.profileImage} alt={s.nama} className="w-full h-full object-cover" />
+                    ) : (
+                      s.nama?.charAt(0)
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-800 truncate">{s.nama}</p>
+                    <p className="text-[10px] text-slate-500 truncate">
+                      {s.id} • {s.kursus}
+                    </p>
+                  </div>
+                  <RiskBadge risk={s.dropoutRisk} showLabel={false} className="shrink-0" />
+                </button>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Context Card */}
@@ -724,14 +872,18 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
 
         return (
           <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-sm space-y-3 animate-[scaleIn_0.3s_ease-out]">
-            <div className="flex justify-between items-center">
-              <span className="font-bold text-slate-800">{selected.nama}</span>
-              <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                selected.dropoutRisk === 'Tinggi' ? 'bg-red-100 text-red-700' :
-                selected.dropoutRisk === 'Sederhana' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-              }`}>
-                {selected.dropoutRisk}
-              </span>
+            <div className="flex justify-between items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-full bg-blue-100 border-2 border-white shadow-sm overflow-hidden flex items-center justify-center text-blue-600 font-bold shrink-0">
+                  {selected.profileImage ? (
+                    <img src={selected.profileImage} alt={selected.nama} className="w-full h-full object-cover" />
+                  ) : (
+                    selected.nama?.charAt(0)
+                  )}
+                </div>
+                <span className="font-bold text-slate-800 truncate">{selected.nama}</span>
+              </div>
+              <RiskBadge risk={selected.dropoutRisk} className="shrink-0" />
             </div>
             <div className="text-slate-600">
               <p><span className="font-semibold">Kursus:</span> {selected.kursus}</p>

@@ -141,3 +141,45 @@ export function SkeletonList({ rows = 3 }) {
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════
+// RISK CLASSIFICATION (Tinggi / Sederhana / Rendah)
+// ═══════════════════════════════════════════════════════
+export function getRiskMeta(risk) {
+  if (risk === "Tinggi" || risk === "Bermasalah")
+    return {
+      level: "Tinggi",
+      label: "Risiko Tinggi",
+      badge: "bg-red-100 text-red-700 border-red-200",
+      dot: "bg-red-500",
+      icon: "ph-warning-octagon",
+    };
+  if (risk === "Sederhana")
+    return {
+      level: "Sederhana",
+      label: "Risiko Sederhana",
+      badge: "bg-amber-100 text-amber-700 border-amber-200",
+      dot: "bg-amber-500",
+      icon: "ph-clock",
+    };
+  return {
+    level: "Rendah",
+    label: "Risiko Rendah",
+    badge: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    dot: "bg-emerald-500",
+    icon: "ph-check-circle",
+  };
+}
+
+export function RiskBadge({ risk, showLabel = true, className = "" }) {
+  const meta = getRiskMeta(risk);
+  return (
+    <span
+      title={`Kategori risiko: ${meta.level}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border animate-[scaleIn_0.25s_ease-out] ${meta.badge} ${className}`}
+    >
+      <i className={`ph-fill ${meta.icon} text-[10px]`}></i>
+      {showLabel ? meta.label : meta.level}
+    </span>
+  );
+}

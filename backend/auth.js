@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateUser, getPublicLoginUsers } from './auth.model.js';
-import { verifyToken, requireAdmin } from './middleware/authMiddleware.js';
+import { verifyToken, requireStaff } from './middleware/authMiddleware.js';
 
 const router = Router();
 
@@ -9,7 +9,7 @@ const router = Router();
  * /api/auth/users:
  *   get:
  *     summary: Get all users
- *     description: Retrieves a sanitized list of all users (without passwords). Admin only.
+ *     description: Retrieves a sanitized list of all users (without passwords). Staff only.
  *     tags: [Authentication]
  *     security:
  *       - bearerAuth: []
@@ -17,9 +17,9 @@ const router = Router();
  *       200:
  *         description: A list of users.
  *       403:
- *         description: Admin access only.
+ *         description: Staff access only.
  */
-router.get('/users', verifyToken, requireAdmin, async (req, res) => {
+router.get('/users', verifyToken, requireStaff, async (req, res) => {
   try {
     const users = await getPublicLoginUsers();
     res.json(users);

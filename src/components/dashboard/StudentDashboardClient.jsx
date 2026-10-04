@@ -351,6 +351,13 @@ export default function StudentDashboardClient() {
           ...prev,
           student: { ...prev.student, profileImage: data.imagePath },
         }));
+
+        // Sync the main students array so it persists across tabs
+        setStudents((prev) =>
+          prev.map((s) =>
+            s.id === selectedStudentId ? { ...s, profileImage: data.imagePath } : s
+          )
+        );
       } catch (err) {
         console.error(err);
         alert("Ralat semasa memuat naik gambar profil.");
@@ -459,6 +466,7 @@ export default function StudentDashboardClient() {
         setIsSidebarOpen={setIsSidebarOpen}
         currentUser={user}
         handleLogout={handleLogout}
+        profileImage={skillGap.student?.profileImage}
       />
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden relative w-full">
@@ -481,13 +489,22 @@ export default function StudentDashboardClient() {
           {activeTab === "dashboard" && (
             <div className="animate-[fadeIn_0.3s_ease-in-out]">
               <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-                <div>
-                  <h1 className="text-2xl font-bold text-slate-900">
-                    Selamat Datang, {currentStudentLabel}! 👋
-                  </h1>
-                  <p className="text-slate-500 text-sm">
-                    Analisis prestasi dan potensi kerjaya anda.
-                  </p>
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-full bg-blue-100 border-2 border-white shadow-md overflow-hidden flex items-center justify-center text-blue-600 font-bold text-xl shrink-0">
+                    {skillGap.student?.profileImage ? (
+                      <img src={skillGap.student.profileImage} alt="Profile" className="w-full h-full object-cover" />
+                    ) : (
+                      skillGap.student?.nama?.charAt(0) || "P"
+                    )}
+                  </div>
+                  <div>
+                    <h1 className="text-2xl font-bold text-slate-900">
+                      Selamat Datang, {currentStudentLabel}! 👋
+                    </h1>
+                    <p className="text-slate-500 text-sm">
+                      Analisis prestasi dan potensi kerjaya anda.
+                    </p>
+                  </div>
                 </div>
                 {skillGap.student?.dropoutRisk === "Tinggi" ||
                 skillGap.student?.dropoutRisk === "Bermasalah" ? (
