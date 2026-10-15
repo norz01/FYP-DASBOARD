@@ -1,8 +1,10 @@
 "use client";
 
 import { useActionState } from "react";
+import { useState } from "react";
 import { useFormStatus } from "react-dom";
 import { loginAction } from "@/app/actions";
+import ForgotPasswordModal from "./ForgotPasswordModal";
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -26,6 +28,8 @@ function SubmitButton() {
 
 export default function LoginForm() {
   const [state, formAction] = useActionState(loginAction, null);
+  const [isForgotOpen, setIsForgotOpen] = useState(false);
+  const SHOW_DEMO_CREDENTIALS = process.env.NODE_ENV !== "production";
 
   return (
     <div className="bg-slate-50 h-screen w-full flex overflow-hidden font-sans text-slate-900">
@@ -71,11 +75,13 @@ export default function LoginForm() {
             <p className="text-slate-500 mt-2">
               Sila log masuk untuk akses papan pemuka.
             </p>
-            <p className="text-xs text-slate-400 mt-3 leading-relaxed">
-              Akaun default: <strong>admin@ikmb.edu.my</strong> atau{" "}
-              <strong>user@ikmb.edu.my</strong>. Semua kata laluan ialah{" "}
-              <strong>password123</strong>.
-            </p>
+            {SHOW_DEMO_CREDENTIALS && (
+              <p className="text-xs text-slate-400 mt-3 leading-relaxed">
+                Akaun default: <strong>admin@ikmb.edu.my</strong> atau{" "}
+                <strong>user@ikmb.edu.my</strong>. Semua kata laluan ialah{" "}
+                <strong>password123</strong>.
+              </p>
+            )}
           </div>
 
           {/* Form with staggered fields */}
@@ -96,7 +102,7 @@ export default function LoginForm() {
                   type="email"
                   name="email"
                   required
-                  defaultValue="admin@ikmb.edu.my"
+                  defaultValue={SHOW_DEMO_CREDENTIALS ? "admin@ikmb.edu.my" : ""}
                   className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all duration-200"
                 />
               </div>
@@ -112,6 +118,7 @@ export default function LoginForm() {
                 </label>
                 <a
                   href="#"
+                  onClick={(e) => { e.preventDefault(); setIsForgotOpen(true); }}
                   className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
                 >
                   Lupa kata laluan?
@@ -126,7 +133,7 @@ export default function LoginForm() {
                   type="password"
                   name="password"
                   required
-                  defaultValue="password123"
+                  defaultValue={SHOW_DEMO_CREDENTIALS ? "password123" : ""}
                   className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all duration-200"
                 />
               </div>
@@ -143,6 +150,7 @@ export default function LoginForm() {
               </p>
             )}
           </form>
+          <ForgotPasswordModal isOpen={isForgotOpen} onClose={() => setIsForgotOpen(false)} />
         </div>
       </div>
     </div>

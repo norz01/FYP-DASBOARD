@@ -39,6 +39,9 @@ dist
 dist-ssr
 *.local
 
+# Security audit output (never commit findings artifacts)
+security-audit-results/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

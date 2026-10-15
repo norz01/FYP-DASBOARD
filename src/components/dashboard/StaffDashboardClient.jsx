@@ -35,8 +35,14 @@ export default function StaffDashboardClient() {
   const [user, setUser] = useState(null);
   const [students, setStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeDataset, setActiveDataset] = useState(null);
+  const [semesters, setSemesters] = useState([]);
 
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === "undefined") return "overview";
+    const t = new URLSearchParams(window.location.search).get("tab");
+    return t || "overview";
+  });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -85,22 +91,48 @@ export default function StaffDashboardClient() {
   useEffect(() => {
     const u = getClientUser();
     setUser(u);
-
+    if (u?.role === "counselor") {
+      setActiveTab((prev) => (prev === "data" ? "overview" : prev));
+    }
     const t = getClientToken();
-
     if (t) {
-      fetch("/api/students", { headers: { Authorization: `Bearer ${t}` } })
-        .then((res) => res.json())
-        .then((data) => setStudents(data))
-        .catch((err) => console.error("Fetch students error:", err))
-        .finally(() => setIsLoading(false));
+      // 📌 Remember which session the admin was viewing before navigating away
+      const requested = new URLSearchParams(window.location.search).get("dataset");
+      fetch("/api/semesters", { headers: { Authorization: `Bearer ${t}` } })
+        .then(async (res) => {
+          if (res.status === 403) {
+            const d = await res.json().catch(() => ({}));
+            if (d.code === "PASSWORD_CHANGE_REQUIRED") {
+              window.location.href = "/change-password";
+              return [];
+            }
+          }
+          return res.json();
+        })
+        .then(data => {
+          const list = Array.isArray(data) ? data : [];
+          setSemesters(list);
+          const restored = requested && list.some(s => s.datasetName === requested);
+          const currentSem = list.find(s => s.isCurrentSemester);
 
-      // MDB management is admin-only
-      if (u?.role === "admin") {
-        fetchMdbFiles(true);
-      } else {
-        setIsLoadingFiles(false);
-      }
+          if (restored) {
+            setActiveDataset(requested);          // return to the session they left
+          } else if (currentSem) {
+            setActiveDataset(currentSem.datasetName);
+          } else if (list.length > 0) {
+            setActiveDataset(list[0].datasetName); // fallback: latest processed
+          } else {
+            setStudents([]);
+            setIsLoading(false);
+          }
+        })
+        .catch((err) => {
+          console.error("Fetch semesters error:", err);
+          setStudents([]);
+          setIsLoading(false);
+        });
+      if (u?.role === "admin") fetchMdbFiles(true);
+      else setIsLoadingFiles(false);
     } else {
       setIsLoading(false);
       setIsLoadingFiles(false);
@@ -143,6 +175,38 @@ export default function StaffDashboardClient() {
     }
   };
 
+  const fetchStudents = (dataset) => {
+    const t = getClientToken();
+    if (!t || !dataset) { 
+      setStudents([]); 
+      setIsLoading(false); 
+      return; 
+    }
+    const url = `/api/students?dataset=${encodeURIComponent(dataset)}`;
+    fetch(url, { headers: { Authorization: `Bearer ${t}` } })
+      .then((res) => res.json())
+      .then((data) => setStudents(Array.isArray(data) ? data : []))
+      .catch((err) => console.error("Fetch students error:", err))
+      .finally(() => setIsLoading(false));
+  };
+
+  useEffect(() => {
+    if (!activeDataset) return;
+    fetchStudents(activeDataset);
+  }, [activeDataset]);
+
+  // 📌 Pin active session AND active tab into the URL so both survive
+  // navigation to /student-profile and back (and browser Back/Forward).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", activeTab);
+    if (activeDataset) params.set("dataset", activeDataset);
+    const qs = params.toString();
+    if (qs !== window.location.search.replace(/^\?/, "")) {
+      router.replace(`/staff-dashboard?${qs}`, { scroll: false });
+    }
+  }, [activeTab, activeDataset]);
+
   // Derived flag: is any ETL job running right now?
   const isAnyProcessing = mdbFiles.some((f) => f.status === "Processing") || processingId !== null;
 
@@ -167,9 +231,24 @@ export default function StaffDashboardClient() {
       if (res.ok) {
         setUploadMsg({ type: "success", text: result.message });
         fetchMdbFiles();
-        // Refresh student list
-        fetch("/api/students", { headers: { Authorization: `Bearer ${t}` } })
-          .then(r => r.json()).then(setStudents);
+        // Refresh semesters and switch to the newly processed one
+        const t = getClientToken();
+        const processedName = mdbFiles.find(m => m._id === id)?.datasetName;
+        fetch("/api/semesters", { headers: { Authorization: `Bearer ${t}` } })
+          .then(res => res.json())
+          .then(data => {
+             const list = Array.isArray(data) ? data : [];
+             setSemesters(list);
+             const justProcessed = list.find(f => f.datasetName === processedName);
+             if (justProcessed) setActiveDataset(justProcessed.datasetName);
+              else if (processedName) setActiveDataset(processedName);
+              else if (activeDataset) fetchStudents(activeDataset);
+              else { setStudents([]); setIsLoading(false); }
+           })
+           .catch(() => {
+             if (activeDataset) fetchStudents(activeDataset);
+             else { setStudents([]); setIsLoading(false); }
+           });
       } else {
         setUploadMsg({ type: "error", text: result.message });
         fetchMdbFiles(); // Refresh to show 'Failed' status
@@ -178,6 +257,25 @@ export default function StaffDashboardClient() {
       setUploadMsg({ type: "error", text: "Gagal menyambung ke pelayan." });
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const handleSetCurrentSemester = async (id) => {
+    const t = getClientToken();
+    if (!t) return;
+    try {
+      const res = await fetch(`/api/data/set-current-semester/${id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${t}` }
+      });
+      if (res.ok) {
+        fetchMdbFiles(); // Refresh table to show the new badge
+        // Refresh semesters dropdown
+        const semRes = await fetch("/api/semesters", { headers: { Authorization: `Bearer ${t}` } });
+        if (semRes.ok) setSemesters(await semRes.json());
+      }
+    } catch (e) {
+      console.error("Set current semester error:", e);
     }
   };
 
@@ -211,6 +309,15 @@ export default function StaffDashboardClient() {
   };
 
   const handleNavigate = (path) => router.push(path);
+  // Carry the active session into the URL so the profile never guesses
+  // which semester snapshot to render.
+  const profileUrl = (id) => {
+    const q = new URLSearchParams();
+    q.set("id", id);
+    if (activeDataset) q.set("dataset", activeDataset);
+    q.set("from", activeTab);
+    return `/student-profile?${q.toString()}`;
+  };
 
   const totalStudents = students.length;
   const highRiskStudents = students.filter(
@@ -441,6 +548,7 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
           studentId: aiStudentId,
           userMessage: messageText,
           chatHistory: aiMessages.filter((m) => !m.streaming && !m.welcome),
+          dataset: activeDataset || undefined,
         }),
       });
 
@@ -597,12 +705,29 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
               <i className="ph ph-magnifying-glass text-lg"></i>
               <input
                 type="text"
-                placeholder="Cari pelajar, kursus, atau ID..."
+                placeholder="Cari pelajar..."
                 className="bg-transparent border-none outline-none text-sm w-full text-slate-700"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
+          </div>
+          
+          {/* NEW: Semester Selector */}
+          <div className="hidden md:flex items-center gap-3">
+             <label className="text-xs font-bold text-slate-500">Semester:</label>
+              <select 
+                 value={activeDataset || ""} 
+                 onChange={(e) => { setActiveDataset(e.target.value); setIsLoading(true); }}
+                 className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                 disabled={semesters.length === 0}
+              >
+                  {semesters.map(s => (
+                    <option key={s._id} value={s.datasetName}>
+                      {s.datasetName} ({s.recordsProcessed} pelajar) {s.isCurrentSemester ? "⭐ (Semasa)" : ""}
+                    </option>
+                ))}
+             </select>
           </div>
         </header>
 
@@ -684,7 +809,7 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                     {highRiskStudents.slice(0, 5).map((s, idx) => (
                       <div
                         key={s.id}
-                        onClick={() => handleNavigate(`/student-profile?id=${s.id}`)}
+                        onClick={() => handleNavigate(profileUrl(s.id))}
                         className="bg-red-50 p-4 rounded-xl border border-red-100 cursor-pointer hover:bg-red-100 hover:shadow-sm hover:translate-x-1 flex justify-between items-center transition-all duration-200 animate-[slideUp_0.3s_ease-out] anim-fill"
                         style={{ animationDelay: `${350 + idx * 60}ms` }}
                       >
@@ -713,7 +838,7 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                         key={s.id}
                         className="bg-yellow-50 p-4 rounded-xl border border-yellow-100 flex justify-between items-center cursor-pointer hover:bg-yellow-100 hover:shadow-sm hover:translate-x-1 transition-all duration-200 animate-[slideUp_0.3s_ease-out] anim-fill"
                         style={{ animationDelay: `${400 + idx * 60}ms` }}
-                        onClick={() => handleNavigate(`/student-profile?id=${s.id}`)}
+                        onClick={() => handleNavigate(profileUrl(s.id))}
                       >
                         <div>
                           <h4 className="font-bold text-slate-800">{s.nama}</h4>
@@ -1126,7 +1251,7 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
             <div className="animate-[fadeIn_0.3s_ease-in-out]">
               <StudentListGrid
                 students={students}
-                onViewProfile={(id) => handleNavigate(`/student-profile?id=${id}`)}
+                onViewProfile={(id) => handleNavigate(profileUrl(id))}
                 onAddStudent={() => {
                   setEditingStudent(null);
                   setFormData({
@@ -1259,7 +1384,14 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                     key={file._id}
                     className={`transition-colors duration-300 ${isProcessingRow ? "bg-yellow-50/60" : "hover:bg-slate-50"}`}
                   >
-                    <td className="px-6 py-4 font-medium text-slate-800">{file.datasetName}</td>
+                    <td className="px-6 py-4 font-medium text-slate-800">
+                      {file.datasetName}
+                      {file.isCurrentSemester && (
+                        <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-200 inline-flex items-center gap-1 animate-[fadeIn_0.3s_ease-out]">
+                          <i className="ph-fill ph-star"></i> Semasa
+                        </span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 text-slate-500">{file.originalName}</td>
                     <td className="px-6 py-4 text-slate-500">{(file.fileSize / (1024 * 1024)).toFixed(2)} MB</td>
                     <td className="px-6 py-4 text-slate-500">{new Date(file.uploadDate).toLocaleDateString("ms-MY")}</td>
@@ -1283,6 +1415,15 @@ const getEmployability = (s) => calculateEmployability(s.cgpa, s.attendance);
                       )}
                     </td>
                     <td className="px-6 py-4 text-right space-x-3">
+                      {file.status === "Processed" && !file.isCurrentSemester && (
+                        <button
+                          onClick={() => handleSetCurrentSemester(file._id)}
+                          className="text-amber-500 hover:text-amber-700 font-semibold transition"
+                          title="Tetapkan sebagai Semester Semasa"
+                        >
+                          <i className="ph ph-star text-lg"></i>
+                        </button>
+                      )}
                       <button
                         onClick={() => handleProcessMdb(file._id)}
                         disabled={isAnyProcessing || deletingId === file._id}

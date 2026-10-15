@@ -1,4 +1,5 @@
 import Student from "./models/Student.js";
+import MdbFile from "./models/MdbFile.js";
 
 const certificationScores = {
   Tiada: 35,
@@ -66,11 +67,28 @@ function normaliseStudent(record) {
     noKP: record.No_KP || '',
     noTelefon: record.No_Telefon || '',
     alamat: record.Alamat || '',
+    sourceDataset: record.sourceDataset || 'unknown',
   };
 }
 
-async function getStudentsDataset() {
-  const rows = await Student.find({});
+// Helper to get the most recent processed semester
+async function getLatestDataset() {
+  // PRIORITY 1: Explicitly marked "Current Semester" by Admin
+  const current = await MdbFile.findOne({ status: 'Processed', isCurrentSemester: true });
+  if (current) return current.datasetName;
+
+  // PRIORITY 2: Fallback to most recently processed
+  const latest = await MdbFile.findOne({ status: 'Processed' }).sort({ processedDate: -1 });
+  return latest ? latest.datasetName : null;
+}
+
+async function getStudentsDataset(datasetFilter = null) {
+  let filter = datasetFilter;
+  if (!filter) {
+    filter = await getLatestDataset();
+    if (!filter) return []; // 🛑 Prevent returning ALL combined legacy data
+  }
+  const rows = await Student.find({ sourceDataset: filter });
   return rows.map((row) => normaliseStudent(row));
 }
 
@@ -123,7 +141,10 @@ export async function getRealAIPrediction(features) {
 
     const aiResponse = await fetch(`${mlApiUrl}/predict/risk`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        'X-API-Key': process.env.ML_API_SECRET || ''
+      },
       body: JSON.stringify({
         CGPA: features.cgpa,
         Attendance: features.attendance,
@@ -160,17 +181,27 @@ export async function getRealAIPrediction(features) {
   }
 }
 
-export async function getAllStudents() {
-  return await getStudentsDataset();
+export async function getAllStudents(datasetFilter = null) {
+  return await getStudentsDataset(datasetFilter);
 }
 
-export async function getStudentById(studentId) {
-  const row = await Student.findOne({ ID_Pelajar: studentId });
+export async function getStudentById(studentId, datasetFilter = null) {
+  let filter = datasetFilter;
+  if (!filter) {
+    filter = await getLatestDataset();
+    if (!filter) return null;
+  }
+  let row = await Student.findOne({ ID_Pelajar: studentId, sourceDataset: filter });
+  // Safety net ONLY for unpinned calls (bookmarks/stale links):
+  // fall back to the student's most recent existing snapshot.
+  if (!row && !datasetFilter) {
+    row = await Student.findOne({ ID_Pelajar: studentId }).sort({ _id: -1 });
+  }
   return row ? normaliseStudent(row) : null;
 }
 
-export async function getStudentSkillGapById(studentId) {
-  const student = await getStudentById(studentId);
+export async function getStudentSkillGapById(studentId, datasetFilter = null) {
+  const student = await getStudentById(studentId, datasetFilter);
   if (!student) return null;
 
   const trueAiRisk = await getRealAIPrediction(student);
@@ -197,12 +228,22 @@ export const createStudent = async (studentData) => {
 };
 
 export const updateStudent = async (id, updateData) => {
-  return await Student.findOneAndUpdate({ ID_Pelajar: id }, updateData, {
-    new: true,
+  // Apply manual edits to all semester snapshots for this student
+  const update = updateData && typeof updateData === "object" && Object.keys(updateData).some((k) => k.startsWith("$"))
+    ? updateData
+    : { $set: updateData };
+  const result = await Student.updateMany({ ID_Pelajar: id }, update, {
     runValidators: true,
   });
+  if (result.matchedCount === 0) return null;
+  return await Student.findOne({ ID_Pelajar: id });
 };
 
 export const deleteStudent = async (id) => {
-  return await Student.findOneAndDelete({ ID_Pelajar: id });
+  // Wipe the student from ALL semester snapshots
+  const result = await Student.deleteMany({ ID_Pelajar: id });
+
+  // Return a truthy value if deleted, or null if not found in any semester
+  // This keeps the existing `if (!deleted)` check in the route working perfectly.
+  return result.deletedCount > 0 ? { deletedCount: result.deletedCount } : null;
 };

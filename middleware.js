@@ -1,22 +1,31 @@
 import { NextResponse } from 'next/server';
+import { jwtVerify } from 'jose'; // Edge-compatible JWT library
 
-export function middleware(request) {
+export async function middleware(request) {
   const { pathname } = request.nextUrl;
-
-  const cookies = request.cookies;
-  const userCookie = cookies?.get?.('user')?.value;
-  
-  let user = null;
-  try {
-    user = userCookie ? JSON.parse(userCookie) : null;
-  } catch (e) {
-    user = null;
-  }
-
   const isLoginPage = pathname === '/' || pathname === '/login';
+
+  // F-4: Verify the HttpOnly JWT at the edge instead of trusting the unsigned 'user' cookie
+  const token = request.cookies.get('ikmbToken')?.value;
+  let user = null;
+  if (token) {
+    try {
+      const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+      const { payload } = await jwtVerify(token, secret, {
+        issuer: process.env.JWT_ISSUER || "tvetmara-backend",
+        audience: process.env.JWT_AUDIENCE || "tvetmara-dashboard",
+      });
+      user = payload; // { email, role, studentId, mcp, pwdAt }
+    } catch (e) {
+      user = null;
+    }
+  }
 
   if (isLoginPage) {
     if (user) {
+      if (user.mcp) {
+        return NextResponse.redirect(new URL('/change-password', request.url));
+      }
       const isStaff = user.role === 'admin' || user.role === 'counselor';
       const dashboardUrl = isStaff ? '/staff-dashboard' : '/student-dashboard';
       return NextResponse.redirect(new URL(dashboardUrl, request.url));
@@ -26,6 +35,13 @@ export function middleware(request) {
 
   if (!user) {
     return NextResponse.redirect(new URL('/', request.url));
+  }
+
+  // 🔐 Forced-change gate (UX layer; the backend enforces this authoritatively).
+  // /change-password stays open to ALL authenticated users so it doubles as a
+  // voluntary change-password page and an escape hatch for stale sessions.
+  if (user.mcp && pathname !== '/change-password') {
+    return NextResponse.redirect(new URL('/change-password', request.url));
   }
 
   const isStaff = user.role === 'admin' || user.role === 'counselor';

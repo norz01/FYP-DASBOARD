@@ -8,10 +8,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "vitest run src/__tests__" 
+    "test": "vitest run src/__tests__"
   },
   "dependencies": {
     "chart.js": "^4.5.1",
+    "jose": "^6.2.12",
     "next": "15.1.6",
     "react": "^19.0.0",
     "react-chartjs-2": "^5.3.1",

@@ -12,7 +12,8 @@ const mdbFileSchema = new mongoose.Schema({
   },
   recordsProcessed: { type: Number, default: 0 },
   uploadDate: { type: Date, default: Date.now },
-  processedDate: { type: Date }
+  processedDate: { type: Date },
+  isCurrentSemester: { type: Boolean, default: false }
 });
 
 export default mongoose.model('MdbFile', mdbFileSchema);

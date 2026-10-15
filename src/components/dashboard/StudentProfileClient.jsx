@@ -76,7 +76,7 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-export default function StudentProfileClient({ studentId }) {
+export default function StudentProfileClient({ studentId, dataset = null, returnTab = null }) {
   const router = useRouter();
   const [skillGap, setSkillGap] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -93,12 +93,23 @@ export default function StudentProfileClient({ studentId }) {
     if (!studentId) return;
     const t = getClientToken();
     if (!t) { router.push("/"); return; }
-    fetch(`/api/students/${studentId}/skill-gap`, { headers: { Authorization: `Bearer ${t}` } })
-      .then((res) => res.json())
+    setLoading(true);
+    const q = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
+    fetch(`/api/students/${studentId}/skill-gap${q}`, { headers: { Authorization: `Bearer ${t}` } })
+      .then(async (res) => {
+        if (res.status === 403) {
+          const d = await res.json().catch(() => ({}));
+          if (d.code === "PASSWORD_CHANGE_REQUIRED") {
+            window.location.href = "/change-password";
+            return null;
+          }
+        }
+        return res.json();
+      })
       .then((data) => setSkillGap(data))
       .catch(() => setSkillGap(null))
       .finally(() => setLoading(false));
-  }, [studentId]);
+  }, [studentId, dataset]);
 
   useEffect(() => {
     setCurrentUser(getClientUser());
@@ -207,6 +218,20 @@ export default function StudentProfileClient({ studentId }) {
 
   const handlePrint = () => window.print();
 
+  // 📌 Return to the exact tab + session the staff member came from.
+  // Reads the origin directly from this page's URL (?from=&dataset=),
+  // so it works even if the page component passes no props.
+  const handleBackToList = () => {
+    const here = new URLSearchParams(window.location.search);
+    const from = returnTab || here.get("from");
+    const session = dataset || here.get("dataset");
+    const q = new URLSearchParams();
+    if (from) q.set("tab", from);
+    if (session) q.set("dataset", session);
+    const qs = q.toString();
+    router.push(`/staff-dashboard${qs ? `?${qs}` : ""}`);
+  };
+
   const handleDownload = () => {
     const exportData = {
       studentDetails: student,
@@ -237,7 +262,7 @@ export default function StudentProfileClient({ studentId }) {
       <div className="mb-6 flex items-center justify-between animate-[slideUp_0.4s_ease-out]">
         <div className="flex items-center gap-2 text-sm">
           <button
-            onClick={() => router.push("/staff-dashboard")}
+            onClick={handleBackToList}
             className="flex items-center gap-1 text-[#5A6A85] hover:text-[#1251AA] font-medium transition-colors duration-200"
           >
             <i className="ph-bold ph-arrow-left"></i> Senarai Pelajar
@@ -269,6 +294,11 @@ export default function StudentProfileClient({ studentId }) {
               </div>
               <h2 className="text-lg font-bold text-[#0A1628]">{student.nama || "Nama Tidak Diketahui"}</h2>
               <p className="text-sm text-[#5A6A85] font-mono">{student.id}</p>
+              {student.sourceDataset && (
+                <p className="text-[10px] text-[#5A6A85] mt-1">
+                  <i className="ph-fill ph-calendar-blank"></i> Sesi: {student.sourceDataset}
+                </p>
+              )}
 
               <div className="mt-6 space-y-3 text-left">
                 <div className="flex justify-between text-sm py-2 border-b border-gray-100">

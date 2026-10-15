@@ -20,12 +20,16 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - NODE_ENV=development        # Forces Express to show detailed error logs
-      - JWT_SECRET=super_secret_fyp_key_2026 # Hardcoded secret to bypass .env issues
-      - MONGO_URI=mongodb://mongodb:27017/ikmb-dashboard
-      - ML_API_URL=http://ml-api:8000
-      - GEMINI_API_KEY=xxx
-      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - NODE_ENV=production
+      # Secrets are now injected from the host environment or .env file
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ISSUER=${JWT_ISSUER:-tvetmara-backend}
+      - JWT_AUDIENCE=${JWT_AUDIENCE:-tvetmara-dashboard}
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017/ikmb-dashboard}
+      - ML_API_URL=${ML_API_URL:-http://ml-api:8000}
+      - ML_API_SECRET=${ML_API_SECRET}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:8080,http://localhost:3000}
     depends_on:
       - mongodb
     volumes:
@@ -42,6 +46,8 @@ services:
     container_name: tvet_ml_api
     ports:
       - "8000:8000"
+    environment:
+      - ML_API_SECRET=${ML_API_SECRET}
     restart: always
     networks:
       - tvet_net
@@ -52,10 +58,14 @@ services:
       dockerfile: Containerfile.frontend
     container_name: tvet_frontend
     ports:
-      - "8080:3000" # Maps host 8080 to Next.js internal 3000
+      - "8080:3000"
     environment:
-      - BACKEND_URL=http://backend:5000 # Allows Server Components to fetch data
+      - BACKEND_URL=http://backend:5000
       - NODE_ENV=production
+      # Frontend Edge Middleware needs these to verify the HttpOnly cookie
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ISSUER=${JWT_ISSUER:-tvetmara-backend}
+      - JWT_AUDIENCE=${JWT_AUDIENCE:-tvetmara-dashboard}
     depends_on:
       - backend
     restart: always

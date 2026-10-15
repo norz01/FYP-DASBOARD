@@ -39,6 +39,8 @@ const studentSchema = new mongoose.Schema({
     },
   ],
   // TAMBAHAN BAHARU:
+  // Tracks which MDB/Semester file created this record
+  sourceDataset: { type: String, default: 'unknown', index: true },
   profileImage: String,
 });
 

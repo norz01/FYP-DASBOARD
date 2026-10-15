@@ -22,6 +22,12 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  // ── Password lifecycle (forced change on first login) ──
+  mustChangePassword: { type: Boolean, default: false },
+  passwordChangedAt: { type: Date },
+  lastLoginAt: { type: Date },
+  loginAttempts: { type: Number, default: 0 },
+  lockUntil: { type: Date },
 });
 
 export default mongoose.model('User', userSchema);

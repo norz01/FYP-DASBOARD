@@ -255,6 +255,19 @@ router.patch("/:id", verifyToken, requireStaff, async (req, res) => {
       return res.status(404).json({ message: "Rujukan tidak dijumpai." });
     }
 
+// NV-2 FIX: Ownership check for counselors
+    if (req.user.role === "counselor") {
+      const isAssignedToMe = report.counselorId === req.user.email;
+      const isPending = report.status === "pending";
+      
+      // Counselors cannot mutate completed/rejected/scheduled cases belonging to others
+      if (!isPending && !isAssignedToMe) {
+        return res.status(403).json({ message: "Akses ditolak. Anda tidak ditugaskan untuk rujukan ini." });
+      }
+    }
+    
+    // ... continue with status state machine (accept/reject/schedule/complete) 
+
     const body = req.body || {};
     const target = String(body.action || body.status || "").toLowerCase();
     const hasNotesUpdate = body.counselorNotes !== undefined;

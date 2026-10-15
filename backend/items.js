@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
@@ -212,18 +213,36 @@ const mdbUpload = multer({
 // STUDENT ROUTES (SECURED & REFACTORED)
 // ==========================================
 
-// Dapatkan semua pelajar (Data Exposure Fix)
+// Dapatkan senarai semester/dataset yang telah diproses
+router.get("/semesters", verifyToken, async (req, res) => {
+  try {
+    const files = await MdbFile.find({ status: 'Processed' })
+      .select('datasetName originalName processedDate recordsProcessed isCurrentSemester')
+      .sort({ processedDate: -1 });
+    res.json(files);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Dapatkan semua pelajar (NV-1 FIX: Strict role gating)
 router.get("/students", verifyToken, async (req, res) => {
   try {
-    // If the user is a student, only return their own data from the DB
-    if (req.user.role === "user" && req.user.studentId) {
-      const student = await getStudentById(req.user.studentId);
+    const datasetFilter = req.query.dataset || null; // Read ?dataset=JJ2026
+    // If the user is a student, they MUST have a studentId bound to their token
+    if (req.user.role === "user") {
+      if (!req.user.studentId) {
+        // Demo user or misconfigured token -> deny access to list
+        return res.json([]); 
+      }
+      let student = await getStudentById(req.user.studentId, datasetFilter);
+      if (!student) student = await getStudentById(req.user.studentId, null); // own latest snapshot
       if (!student) return res.json([]); 
       return res.json([student]); // Wrap in array to match frontend expectations
     }
 
-    // Admin gets all students
-    const students = await getAllStudents();
+    // Only staff (admin/counselor) reaches here
+    const students = await getAllStudents(datasetFilter);
     res.json(students);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -256,7 +275,11 @@ router.delete("/students/:studentId", verifyToken, requireStaff, async (req, res
   try {
     const deleted = await deleteStudent(req.params.studentId);
     if (!deleted) return res.status(404).json({ message: "Student not found" });
-    res.json({ message: "Student deleted successfully" });
+
+    // CLEANUP: Also remove their login account so they can't log in to an empty profile
+    await User.deleteMany({ studentId: req.params.studentId, role: 'user' });
+
+    res.json({ message: `Student deleted successfully from ${deleted.deletedCount} semester snapshot(s).` });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -265,7 +288,8 @@ router.delete("/students/:studentId", verifyToken, requireStaff, async (req, res
 // Dapatkan pelajar mengikut ID (Secured with Ownership Check)
 router.get("/students/:studentId", verifyToken, requireOwnershipOrAdmin, async (req, res) => {
   try {
-    const student = await getStudentById(req.params.studentId);
+    const datasetFilter = req.query.dataset || null;
+    const student = await getStudentById(req.params.studentId, datasetFilter);
     if (!student) return res.status(404).json({ message: "Student not found" });
     return res.json(student);
   } catch (error) {
@@ -276,7 +300,8 @@ router.get("/students/:studentId", verifyToken, requireOwnershipOrAdmin, async (
 // Dapatkan analisis jurang skill (Secured with Ownership Check)
 router.get("/students/:studentId/skill-gap", verifyToken, requireOwnershipOrAdmin, async (req, res) => {
   try {
-    const skillGap = await getStudentSkillGapById(req.params.studentId);
+    const datasetFilter = req.query.dataset || null;
+    const skillGap = await getStudentSkillGapById(req.params.studentId, datasetFilter);
     if (!skillGap)
       return res
         .status(404)
@@ -309,14 +334,14 @@ router.post(
         filePath: `/uploads/certificates/${req.file.filename}`,
       };
 
-      const updatedStudent = await Student.findOneAndUpdate(
+      // Apply certificate to ALL semester snapshots for this student
+      const updateResult = await Student.updateMany(
         { ID_Pelajar: studentId },
-        { $push: { uploadedCertificates: newCert } },
-        { new: true },
+        { $push: { uploadedCertificates: newCert } }
       );
 
-      if (!updatedStudent) {
-        return res.status(404).json({ message: "Student not found" });
+      if (updateResult.matchedCount === 0) {
+        return res.status(404).json({ message: "Student not found in any semester" });
       }
 
       res
@@ -340,21 +365,44 @@ router.delete(
     try {
       const { studentId, certId } = req.params;
 
-      const student = await Student.findOne({ ID_Pelajar: studentId });
-      if (!student)
-        return res.status(404).json({ message: "Student not found" });
+      // Cari satu snapshot untuk dapatkan laluan fail fizikal sebelum pull
+      const holder = await Student.findOne(
+        { ID_Pelajar: studentId, "uploadedCertificates._id": certId },
+        { "uploadedCertificates.$": 1 }
+      );
 
-      const cert = student.uploadedCertificates.id(certId);
-      if (!cert)
+      if (!holder) {
+        // Bezakan "pelajar tiada" vs "sijil tiada"
+        const studentExists = await Student.exists({ ID_Pelajar: studentId });
+        if (!studentExists)
+          return res.status(404).json({ message: "Student not found" });
         return res.status(404).json({ message: "Certificate not found" });
-
-      const filePath = path.join(process.cwd(), cert.filePath);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
       }
 
-      cert.deleteOne();
-      await student.save();
+      const certFilePath = holder.uploadedCertificates?.[0]?.filePath;
+
+// NV-3 FIX: Path traversal guard
+      const uploadsRoot = path.resolve(process.cwd(), "uploads");
+      const resolvedFilePath = path.resolve(process.cwd(), certFilePath || "");
+
+      if (certFilePath && fs.existsSync(resolvedFilePath)) {
+        if (resolvedFilePath.startsWith(uploadsRoot + path.sep)) {
+          fs.unlinkSync(resolvedFilePath);
+        } else {
+          console.warn(`🔴 Blocked path traversal attempt on cert delete: ${resolvedFilePath}`);
+          return res.status(400).json({ message: "Invalid file path." });
+        }
+      }
+
+      // Pull the certificate from ALL semester snapshots
+      const updateResult = await Student.updateMany(
+        { ID_Pelajar: studentId },
+        { $pull: { uploadedCertificates: { _id: certId } } }
+      );
+
+      if (updateResult.matchedCount === 0) {
+        return res.status(404).json({ message: "Student not found" });
+      }
 
       res.json({ message: "Certificate deleted successfully" });
     } catch (error) {
@@ -379,13 +427,13 @@ router.post(
 
       const imagePath = `/uploads/certificates/${req.file.filename}`;
 
-      const updatedStudent = await Student.findOneAndUpdate(
+      // Update profile image across ALL semester snapshots
+      const updateResult = await Student.updateMany(
         { ID_Pelajar: studentId },
-        { profileImage: imagePath },
-        { new: true }
+        { $set: { profileImage: imagePath } }
       );
 
-      if (!updatedStudent) {
+      if (updateResult.matchedCount === 0) {
         return res.status(404).json({ message: "Student not found" });
       }
 
@@ -425,7 +473,8 @@ async function executeEtlAndSync(mdbRecord) {
 
     const mlResponse = await fetch(`${mlApiUrl}/etl/process-mdb`, {
       method: 'POST',
-      body: formData
+      body: formData,
+      headers: { 'X-API-Key': process.env.ML_API_SECRET || '' }
     });
 
     if (!mlResponse.ok) {
@@ -434,6 +483,9 @@ async function executeEtlAndSync(mdbRecord) {
     }
 
     const { data: students } = await mlResponse.json();
+
+    // Tag semua rekod dengan dataset/semester sumber
+    const datasetName = mdbRecord.datasetName || 'unknown';
 
     // 2. AI Batch Prediction
     if (students.length > 0) {
@@ -449,7 +501,10 @@ async function executeEtlAndSync(mdbRecord) {
 
         const batchResponse = await fetch(`${mlApiUrl}/predict/batch`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            "X-API-Key": process.env.ML_API_SECRET || ''
+          },
           body: JSON.stringify({ students: batchPayload }),
         });
 
@@ -464,21 +519,39 @@ async function executeEtlAndSync(mdbRecord) {
       }
     }
 
-    // 3. Sync to MongoDB
-    if (students.length > 0) {
-      const newStudentIds = students.map(s => s.ID_Pelajar);
-      await Student.deleteMany({ ID_Pelajar: { $nin: newStudentIds } });
-    }
+// 3. Sync to MongoDB
+    // F-2 FIX: REMOVED destructive `Student.deleteMany({ ID_Pelajar: { $nin: newStudentIds } })`
+    // We now only upsert/update records present in the file, leaving out-of-scope records intact.
 
-    const salt = await bcrypt.genSalt(10);
-    const defaultPassword = await bcrypt.hash("password123", salt);
     const studentOps = [];
     const userOps = [];
 
+    // 📦 ASSET CARRY-FORWARD (FIX): profile images & certificates belong to the
+    // STUDENT, not the semester. New snapshots inherit them on creation, and
+    // older snapshots missing them get healed on every (re)process.
+    const assetRows = await Student.find(
+      { ID_Pelajar: { $in: students.map((s) => s.ID_Pelajar) } },
+      { ID_Pelajar: 1, profileImage: 1, uploadedCertificates: 1 }
+    ).sort({ _id: 1 });
+    const assetMap = new Map();
+    for (const row of assetRows) {
+      const cur = assetMap.get(row.ID_Pelajar) || { profileImage: null, uploadedCertificates: [] };
+      if (!cur.profileImage && row.profileImage) cur.profileImage = row.profileImage;
+      if (
+        (!cur.uploadedCertificates || cur.uploadedCertificates.length === 0) &&
+        Array.isArray(row.uploadedCertificates) && row.uploadedCertificates.length > 0
+      ) {
+        cur.uploadedCertificates = row.uploadedCertificates;
+      }
+      assetMap.set(row.ID_Pelajar, cur);
+    }
+
     for (let data of students) {
+      const assets = assetMap.get(data.ID_Pelajar) || { profileImage: null, uploadedCertificates: [] };
       studentOps.push({
         updateOne: {
-          filter: { ID_Pelajar: data.ID_Pelajar },
+          // FIX: Compound key ensures a NEW document is created for this specific semester
+          filter: { ID_Pelajar: data.ID_Pelajar, sourceDataset: datasetName },
           update: {
             $set: {
               Nama: data.Nama, Kursus: data.Kursus, Semester: data.Semester,
@@ -490,16 +563,28 @@ async function executeEtlAndSync(mdbRecord) {
               PLO_4: data.PLO_4, PLO_5: data.PLO_5, PLO_6: data.PLO_6,
               PLO_7: data.PLO_7, PLO_8: data.PLO_8, PLO_9: data.PLO_9,
               academicHistory: data.academicHistory || [],
+              sourceDataset: datasetName, // ADD THIS LINE to tag the semester
+              // 📦 Student-level assets: sync into EVERY semester snapshot
+              profileImage: assets.profileImage || null,
+              uploadedCertificates: assets.uploadedCertificates || [],
             }
           },
           upsert: true
         }
       });
 
+      // F-2 FIX: Generate secure random password for NEW users only.
+      // $setOnInsert ensures we NEVER overwrite an existing user's password.
+      const tempPass = crypto.randomBytes(16).toString('base64url');
+      const hashedPass = await bcrypt.hash(tempPass, 10);
+
       userOps.push({
         updateOne: {
           filter: { email: `${data.ID_Pelajar}@student.ikmb.edu.my` },
-          update: { $set: { password: defaultPassword, role: "user", displayName: data.Nama, studentId: data.ID_Pelajar } },
+          update: { 
+            $set: { role: "user", displayName: data.Nama, studentId: data.ID_Pelajar },
+            $setOnInsert: { password: hashedPass, mustChangePassword: true } 
+          },
           upsert: true
         }
       });
@@ -583,6 +668,26 @@ router.post("/data/process-mdb/:id", verifyToken, requireAdmin, async (req, res)
   }
 });
 
+// Set a specific processed dataset as the "Current Semester"
+router.patch("/data/set-current-semester/:id", verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const targetFile = await MdbFile.findById(targetId);
+    if (!targetFile || targetFile.status !== 'Processed') {
+      return res.status(404).json({ message: "Dataset tidak dijumpai atau belum diproses." });
+    }
+
+    // Unset all others, set this one as current
+    await MdbFile.updateMany({}, { $set: { isCurrentSemester: false } });
+    targetFile.isCurrentSemester = true;
+    await targetFile.save();
+
+    res.json({ message: `${targetFile.datasetName} telah ditetapkan sebagai Semester Semasa.`, file: targetFile });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // 4. Delete an MDB file
 router.delete("/data/mdb-files/:id", verifyToken, requireAdmin, async (req, res) => {
   try {
@@ -612,7 +717,7 @@ router.delete("/data/mdb-files/:id", verifyToken, requireAdmin, async (req, res)
 // ==========================================
 router.post("/ai/chat", verifyToken, requireStaff, aiRateLimiter, async (req, res) => {
   try {
-    const { studentId, userMessage, chatHistory } = req.body || {};
+    const { studentId, userMessage, chatHistory, dataset } = req.body || {};
 
     // --- STRICT VALIDATION ---
     if (typeof studentId !== "string" || !studentId.trim())
@@ -624,7 +729,8 @@ router.post("/ai/chat", verifyToken, requireStaff, aiRateLimiter, async (req, re
     if (!process.env.GEMINI_API_KEY)
       return res.status(500).json({ message: "Kunci API Gemini tidak dikonfigurasi di pelayan." });
 
-    const student = await getStudentById(studentId.trim());
+    const pinned = typeof dataset === "string" && dataset.trim() ? dataset.trim() : null;
+    const student = await getStudentById(studentId.trim(), pinned);
     if (!student) return res.status(404).json({ message: "Pelajar tidak dijumpai." });
 
     // 2. Format data for the AI (Exclude PII like IC/Phone for privacy)
@@ -633,6 +739,7 @@ router.post("/ai/chat", verifyToken, requireStaff, aiRateLimiter, async (req, re
       nama: student.nama,
       kursus: student.kursus,
       semester: student.semester,
+      sumberSemester: student.sourceDataset,
       cgpa: student.cgpa,
       kehadiran: student.attendance,
       statusRisiko: student.dropoutRisk, // Tinggi / Sederhana / Rendah

@@ -173,6 +173,8 @@ export default function StudentDashboardClient() {
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [skillGap, setSkillGap] = useState(initialSkillGap);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeDataset, setActiveDataset] = useState(null);
+  const [semesters, setSemesters] = useState([]);
 
   const [customCerts, setCustomCerts] = useState([]);
   const [newCert, setNewCert] = useState({ name: "", issuer: "" });
@@ -185,26 +187,78 @@ export default function StudentDashboardClient() {
   useEffect(() => {
     const u = getClientUser();
     setUser(u);
-
     const t = getClientToken();
     if (t) {
-      fetch("/api/students", { headers: { Authorization: `Bearer ${t}` } })
-        .then((res) => res.json())
-        .then((data) => {
-          const isRestrictedUser = u?.role === "user" && u?.studentId;
-          const visibleStudents = isRestrictedUser
-            ? data.filter((s) => s.id === u.studentId)
-            : data;
-          setStudents(visibleStudents);
-          if (visibleStudents.length > 0)
-            setSelectedStudentId(visibleStudents[0].id);
+      fetch("/api/semesters", { headers: { Authorization: `Bearer ${t}` } })
+        .then(async (res) => {
+          if (res.status === 403) {
+            const d = await res.json().catch(() => ({}));
+            if (d.code === "PASSWORD_CHANGE_REQUIRED") {
+              window.location.href = "/change-password";
+              return [];
+            }
+          }
+          return res.json();
         })
-        .catch((err) => console.error("Fetch students error:", err))
-        .finally(() => setIsLoading(false));
+        .then(data => {
+          const list = Array.isArray(data) ? data : [];
+          setSemesters(list);
+          const currentSem = list.find(s => s.isCurrentSemester);
+
+          if (currentSem) {
+            setActiveDataset(currentSem.datasetName);
+          } else if (list.length > 0) {
+            setActiveDataset(list[0].datasetName);
+          } else {
+            setActiveDataset(null);
+            setStudents([]);
+            setIsLoading(false);
+          }
+        })
+        .catch((err) => {
+          console.error("Fetch semesters error:", err);
+          setActiveDataset(null);
+          setStudents([]);
+          setIsLoading(false);
+        });
     } else {
       setIsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!activeDataset) {
+      setStudents([]);
+      setIsLoading(false);
+      return;
+    }
+    const u = getClientUser();
+    const t = getClientToken();
+    if (t) {
+      setIsLoading(true);
+      const url = `/api/students?dataset=${encodeURIComponent(activeDataset)}`;
+      fetch(url, { headers: { Authorization: `Bearer ${t}` } })
+        .then((res) => res.json())
+        .then((data) => {
+          const list = Array.isArray(data) ? data : [];
+          const isRestrictedUser = u?.role === "user" && u?.studentId;
+          const visibleStudents = isRestrictedUser
+            ? list.filter((s) => s.id === u.studentId)
+            : list;
+          setStudents(visibleStudents);
+          if (visibleStudents.length > 0) {
+            // Kekalkan pilihan sedia ada jika masih wujud, jika tidak pilih yang pertama
+            setSelectedStudentId((prev) =>
+              visibleStudents.some((s) => s.id === prev) ? prev : visibleStudents[0].id
+            );
+          } else {
+            setSelectedStudentId("");
+          }
+        })
+        .catch((err) => console.error("Fetch students error:", err))
+        .finally(() => setIsLoading(false));
+    }
+  }, [activeDataset]);
 
   const isRestrictedUser = user?.role === "user" && user?.studentId;
   const currentStudentLabel = user?.displayName || "Pelajar";
@@ -221,12 +275,13 @@ export default function StudentDashboardClient() {
       const t = getClientToken();
       if (!t) { router.push("/"); return; }
       try {
-        const resGap = await fetch(`/api/students/${selectedStudentId}/skill-gap`, {
+        const datasetQuery = activeDataset ? `?dataset=${encodeURIComponent(activeDataset)}` : "";
+        const resGap = await fetch(`/api/students/${selectedStudentId}/skill-gap${datasetQuery}`, {
           headers: { Authorization: `Bearer ${t}` },
         });
         setSkillGap(await resGap.json());
 
-        const resStudent = await fetch(`/api/students/${selectedStudentId}`, {
+        const resStudent = await fetch(`/api/students/${selectedStudentId}${datasetQuery}`, {
           headers: { Authorization: `Bearer ${t}` },
         });
         const studentData = await resStudent.json();
@@ -238,7 +293,7 @@ export default function StudentDashboardClient() {
       }
     };
     loadStudentData();
-  }, [selectedStudentId]);
+  }, [selectedStudentId, activeDataset]);
 
   const radarData = {
     labels: skillGap.chart.labels,
@@ -521,6 +576,15 @@ export default function StudentDashboardClient() {
                   </span>
                 )}
               </header>
+
+              {activeDataset && (
+                <div className="mb-6 animate-[fadeIn_0.3s_ease-in-out]">
+                  <span className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 border border-blue-200 px-4 py-2 rounded-full text-sm font-bold shadow-sm">
+                    <i className="ph-fill ph-calendar-check text-lg"></i>
+                    Semester Semasa: <span className="font-extrabold text-blue-900">{activeDataset}</span>
+                  </span>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">

@@ -40,11 +40,13 @@ const seedAdminDatabase = async () => {
         { email: account.email },
         {
           $set: {
-            password: defaultPassword,
             role: account.role,
             displayName: account.displayName,
             studentId: null,
           },
+          $setOnInsert: {
+            password: defaultPassword,
+          }
         },
         { upsert: true, returnDocument: "after" }
       );

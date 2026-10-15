@@ -76,27 +76,33 @@ const seedDatabase = async () => {
         { email: `${data.ID_Pelajar}@student.ikmb.edu.my` },
         {
           $set: {
-            password: defaultPassword,
             role: "user",
             displayName: data.Nama,
             studentId: data.ID_Pelajar,
           },
+          $setOnInsert: {
+            password: defaultPassword,
+            mustChangePassword: true,
+          }
         },
         { upsert: true, returnDocument: "after" }
       );
     }
+
+    console.log("🔐 Menandai akaun pelajar sedia ada untuk tukar kata laluan...");
+    const flagged = await User.updateMany(
+      { role: "user", studentId: { $ne: null }, passwordChangedAt: { $exists: false } },
+      { $set: { mustChangePassword: true } }
+    );
+    console.log(`   → ${flagged.modifiedCount} akaun pelajar ditandai.`);
 
     console.log("👑 Menambah akaun admin...");
 
     await User.findOneAndUpdate(
       { email: "admin@ikmb.edu.my" },
       {
-        $set: {
-          password: defaultPassword,
-          role: "admin",
-          displayName: "Admin IKMB",
-          studentId: null,
-        },
+        $set: { role: "admin", displayName: "Admin IKMB", studentId: null },
+        $setOnInsert: { password: defaultPassword }
       },
       { upsert: true, returnDocument: "after" }
     );
@@ -106,12 +112,8 @@ const seedDatabase = async () => {
     await User.findOneAndUpdate(
       { email: "counselor@ikmb.edu.my" },
       {
-        $set: {
-          password: defaultPassword,
-          role: "counselor",
-          displayName: "Counselor IKMB",
-          studentId: null,
-        },
+        $set: { role: "counselor", displayName: "Counselor IKMB", studentId: null },
+        $setOnInsert: { password: defaultPassword }
       },
       { upsert: true, returnDocument: "after" }
     );
@@ -121,12 +123,8 @@ const seedDatabase = async () => {
     await User.findOneAndUpdate(
       { email: "user@ikmb.edu.my" },
       {
-        $set: {
-          password: defaultPassword,
-          role: "user",
-          displayName: "User IKMB",
-          studentId: null,
-        },
+        $set: { role: "user", displayName: "User IKMB", studentId: null },
+        $setOnInsert: { password: defaultPassword }
       },
       { upsert: true, returnDocument: "after" }
     );
