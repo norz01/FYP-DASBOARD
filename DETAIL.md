@@ -1,488 +1,484 @@
 # Project Architecture & Technical Blueprint
 
-> TVETMARA Besut — Skills & Talent Development Dashboard (Sistem Papan Pemuka Pintar).
-> Next.js 15 SSR frontend + Express 5 backend + FastAPI ML service + MongoDB.
-> Purpose: monitor student performance, predict dropout risk with AI, manage counseling interventions, ingest academic records from Microsoft Access `.mdb` files, and deliver personalized career and course recommendations.
-
-## 1. System Overview & Tech Stack
-
-### Core Framework & Runtime
-
-| Layer | Technology | Exact Version | Notes |
-| :--- | :--- | :--- | :--- |
-| Frontend framework | Next.js (App Router, SSR, standalone output) | 15.1.6 | `output: 'standalone'` in `next.config.mjs`. All pages set `export const dynamic = 'force-dynamic'` to avoid cookie reads at build time |
-| UI runtime | React + React DOM | 19.0.0 | Uses `useActionState` (React 19) in `LoginForm.jsx` for Server Action login |
-| Language | JavaScript (JSX, ES Modules) | — | `package.json` sets `"type": "module"`. Path alias `@/*` maps to `./src/*` via `jsconfig.json` |
-| Font | `next/font/google` — Plus Jakarta Sans | weights 400, 500, 600, 700, `display: swap`, subset latin | Applied in `src/app/layout.jsx` via `plusJakartaSans.className` on `<body>`, `lang="ms"` on `<html>` |
-| Icons | Phosphor Icons Web | loaded via CDN | `<Script src="https://unpkg.com/@phosphor-icons/web" strategy="beforeInteractive" />` in root layout. Consumed as `<i className="ph ph-...">` and `<i className="ph-bold ph-...">` and `<i className="ph-fill ph-...">` |
-| Edge auth | `jose` (Edge-compatible JWT verify) | 6.2.12 | Used only in `middleware.js` (`jwtVerify`). Backend uses `jsonwebtoken` 9.0.3 for signing and verifying |
-| Backend runtime | Node.js | 20 (Alpine image `docker.io/node:20-alpine`) | Both frontend builder/runner and backend containers use Node 20 |
-| Backend framework | Express | 5.2.1 | Entry `backend/server.js`, `type: module`. JSON body limit `200kb` |
-| Backend ODM | Mongoose | 9.3.3 | Models in `backend/models/`. Database name `ikmb-dashboard` |
-| Backend auth crypto | `bcryptjs` | 3.0.3 | Salt rounds 10 for seeded passwords. `jsonwebtoken` 9.0.3 signs HS256 tokens with 8-hour expiry |
-| Backend uploads | `multer` | 2.2.0 | Disk storage with timestamped filenames. Limits 5 MB for certificates/referrals/reports, 100 MB for `.mdb` |
-| Backend hardening | `helmet` 8.3.0, `cors` 2.8.6, `express-rate-limit` 8.7.0 | — | Helmet CSP configured for self + unpkg + Google Fonts + Unsplash images. CORS allowlist from `CORS_ORIGIN` with `credentials: true`. AI chat route rate-limited to 15 requests per 60 seconds per staff email |
-| Backend docs | `swagger-jsdoc` 6.3.0 + `swagger-ui-express` 5.0.1 | OpenAPI 3.0.0 | Served at `GET /api/docs`. Scans `auth.js`, `items.js`, `reports.js`, `studentReports.js` |
-| Backend config | `dotenv` | 17.3.1 | Loads `backend/.env` |
-| ML runtime | Python | 3.9-slim (`docker.io/python:3.9-slim`) | Server `uvicorn ml:app --host 0.0.0.0 --port 8000` |
-| ML framework | FastAPI + Uvicorn | pinned via `ML/requirements.txt` (`fastapi`, `uvicorn`) | App variable `app` in `ML/ml.py`, titled `TVETMARA AI Prediction API V4` |
-| ML stack | `scikit-learn`, `joblib`, `pydantic`, `pandas`, `numpy`, `httpx`, `python-multipart` | — | Model artifacts `model_ai_risiko_lengkap_v3.pkl` and `model_ai_risiko_lengkap_v4.pkl`. Active path `model_ai_risiko_lengkap_v4.pkl`. ETL uses system package `mdbtools` (`mdb-tables`, `mdb-export`) installed via `apt-get` |
-| ML model | RandomForestClassifier with GridSearchCV | — | Features: `CGPA`, `Avg_Subjek_Attendance`, `PLO_1` through `PLO_9`, `PLO_Avg`, `PLO_Variance`. Target `Status_Pelajar` with values `Cemerlang`, `Sederhana`, `Bermasalah`. Scoring `f1_weighted`. Artifacts loaded with `joblib` |
-| Database | MongoDB | `docker.io/mongo:latest` | Service `tvet_mongodb`, port 27017, volume `./mongodb_data:/data/db`, network `tvet_net` |
-| Lint / test (frontend) | ESLint 9 + `eslint-config-next` 15.1.6, Vitest 4.1.10, `jsdom` 29.1.1, Testing Library `react` 16.3.2 + `jest-dom` 6.9.1 + `user-event` 14.6.1 | — | `npm test` runs `vitest run src/__tests__`. Vitest alias `@` points to `./src`. ESLint disables `react/no-unescaped-entities` and `@next/next/no-img-element` |
-| Test (backend) | Jest 30.4.2 + Supertest 7.2.2 + `cross-env` 10.1.0 + Babel preset-env | — | `npm test` runs `cross-env NODE_ENV=test node --experimental-vm-modules node_modules/jest/bin/jest.js --forceExit` |
-| Test (ML) | `pytest` + `pytest-asyncio` | — | `ML/test_ml.py` uses FastAPI `TestClient` |
-| Styling build | Tailwind CSS 3.4.19 + Autoprefixer 10.4.27 + PostCSS 8.5.6 | — | `postcss.config.js` registers `tailwindcss` and `autoprefixer`. `tailwind.config.js` scans `src/app/**` and `src/components/**` |
-| CI/CD | GitHub Actions (`.github/workflows/ci.yml`) | Node 20, Python 3.9 | Four jobs: frontend test plus build, backend test, ML test, Docker build gated on all three passing |
-| Deployment | Podman/Docker Compose (`compose.yml`), three Containerfiles | — | Services: `mongodb`, `backend` (port 5000), `ml-api` (port 8000), `frontend` (host 8080 mapped to container 3000). Frontend is multi-stage build (deps, builder, runner as non-root `nextjs` uid 1001). Backend image installs production dependencies only. ML image installs `mdbtools` |
-
-### State Management & Data Fetching Strategy
-
-- No global store (no Redux, Zustand, or React Context for domain state). Every dashboard client owns local `useState` plus `useEffect` for fetching plus `useMemo` for derived lists plus `useRef` for scroll anchoring, dropdown dismissal, and modal references.
-- Authentication state is cookie-based, not in-memory:
-  - Server Action `loginAction` in `src/app/actions.js` posts credentials to `${BACKEND_URL}/api/auth/login`, then sets two cookies: `user` (JSON stringified `{email, role, displayName, studentId}`, `httpOnly: false`, `maxAge: 86400`, `path: /`) for UI display and client-side role checks, and `ikmbToken` (JWT, `httpOnly: true`, `secure` in production, `sameSite: lax`, `maxAge: 86400`, `path: /`) for real authorization.
-  - `logoutAction` deletes both cookies and redirects to `/`.
-  - Server helper `src/lib/auth.js` exposes `getStoredUser()` (parses `user` cookie) and `getToken()` (reads `ikmbToken`), plus `getDashboardPathForRole(role)` which maps `admin` and `counselor` to `/staff-dashboard` and all other roles to `/student-dashboard`.
-  - Client helper `src/lib/client-auth.js` exposes `getClientUser()` (parses `document.cookie` for the non-HttpOnly `user` cookie) and `getClientToken()` which returns the sentinel string `"proxy-handled"` because the real JWT is HttpOnly and unreadable from JavaScript.
-- Two data-fetching paths coexist:
-  - Direct same-origin fetches with explicit `Authorization: Bearer <token>` header: used by `StaffDashboardClient.jsx`, `StudentDashboardClient.jsx`, and `StudentProfileClient.jsx` via `getClientToken()` placeholder logic and direct `fetch('/api/...')` calls that rely on the browser sending cookies. These call backend paths such as `/api/semesters`, `/api/students`, `/api/students/:id/skill-gap`, `/api/data/*`, `/api/students/:id/certificates`, and `/api/ai/chat`.
-  - Next.js proxy route `src/app/api/[...proxy]/route.js`: catches all HTTP verbs (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) under `/api/*`, reads the HttpOnly `ikmbToken` via `next/headers` cookies, injects it as `Authorization: Bearer <token>`, strips `host`, `connection`, and `content-length` headers, forwards method plus query string plus body blob to `${BACKEND_URL}/api/<path>`, and streams the backend response back while stripping `transfer-encoding`. On network failure it returns HTTP 500 with `{ message: 'Proxy connection failed' }`. Static uploads under `/uploads/*` are instead rewritten at the edge by `next.config.mjs` to `http://backend:5000/uploads/*`.
-- Backend-to-ML fetching uses Node `fetch` with `FormData` and `Blob` for ETL (`POST {ML_API_URL}/etl/process-mdb` with `X-API-Key: ML_API_SECRET`) and JSON posts for batch prediction (`POST {ML_API_URL}/predict/batch`). The standalone script `backend/repredict-status.js` posts batch predictions in chunks of 500 without the API key header.
-- AI chat fetching uses backend-to-Gemini REST: `POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent` for JSON fallback and `POST ...:streamGenerateContent?alt=sse` for streaming, with headers `Content-Type: application/json` and `x-goog-api-key: GEMINI_API_KEY`, body containing `systemInstruction`, sanitized `contents`, and `generationConfig { temperature: 0.4, maxOutputTokens: 1024 }`.
-
-### Styling & UI Layer
-
-- Methodology: utility-first Tailwind CSS plus a custom motion system defined in `src/app/globals.css` plus shared primitives in `src/components/ui/dashboard-kit.jsx`.
-- Tailwind theme extension: `fontFamily.sans` set to `"Plus Jakarta Sans", sans-serif`. No custom colors or breakpoints; all color usage is inline Tailwind palette classes (`blue-600`, `emerald-600`, `slate-50`, `red-500`, `amber-500`, `purple-100`).
-- Custom keyframes in `globals.css`: `fadeIn` (opacity 0 plus translateY 6px to identity), `slideInLeft` (translateX negative 32px), `slideInRight` (translateX positive 32px), `slideUp` (translateY 20px), `scaleIn` (scale 0.92), `floatSoft` (translateY 0 to negative 8px loop), `shimmer` (background-position negative 200 percent to positive 200 percent). Consumed exclusively through Tailwind arbitrary animation syntax such as `animate-[fadeIn_0.3s_ease-in-out]`, `animate-[slideUp_0.4s_ease-out_0.2s]`, `animate-[scaleIn_0.3s_ease-out]`, `animate-[slideInLeft_0.5s_ease-out_0.1s]`, `animate-[floatSoft_3s_ease-in-out_infinite]`.
-- Custom utilities in `@layer utilities`: stagger delays `stagger-1` through `stagger-8` (50 ms through 400 ms), `anim-fill` (`animation-fill-mode: both` so pre-delay state stays invisible), `skeleton-shimmer` (linear gradient `#f1f5f9` to `#e2e8f0` with `background-size: 200% 100%` and `shimmer 1.5s ease-in-out infinite`), mobile-first helpers `touch-target` (minimum 44 by 44 px per Apple HIG), `text-responsive-sm` through `text-responsive-2xl` (CSS `clamp()`), `no-select`, `scroll-smooth-mobile`, `safe-area-top`, `safe-area-bottom`, `pb-safe`.
-- Charting: `chart.js` 4.5.1 with `react-chartjs-2` 5.3.1. Chart types used: Bar (PLO averages versus target in staff overview, GPA trend combo in student profile), Line (GPA overlay on the same combo chart), Radar (skill-gap current versus target in student dashboard and student profile). No Framer Motion, no GSAP, no CSS-in-JS.
-- Shared UI primitives in `dashboard-kit.jsx`: `Badge`, `StatCard`, `SectionCard`, `PillTabs`, `EmptyState`, `SkeletonList`, `RiskBadge`, `getRiskMeta`, `formatMsDate`, `toneClasses`. File preview in `AttachmentPreview.jsx` driven by the `useFilePreview` hook.
-
-### Third-Party Services / External Integrations
-
-| Integration | Direction | Authentication | Usage |
-| :--- | :--- | :--- | :--- |
-| Google Gemini (`gemini-3.5-flash-lite`) | Backend to Google REST | `GEMINI_API_KEY` in `x-goog-api-key` header, never exposed to browser | Staff AI chatbot in `POST /api/ai/chat`. System prompt combines role `Pembantu Pintar TVETMARA`, static `TVET_KNOWLEDGE` grounding (course codes, career mapping, PLO definitions, thresholds, intervention catalog), and per-student `<DATA_PELAJAR>` JSON stripped of PII (no IC, phone, or address). Streaming via SSE with JSON fallback |
-| Unsplash CDN | Browser to `images.unsplash.com` | None | Login brand-panel background photo with `opacity-40 mix-blend-overlay`. Explicitly allowed in Helmet `imgSrc` |
-| Google Fonts | Browser to `fonts.googleapis.com` and `fonts.gstatic.com` | None | Allowed in Helmet `styleSrc` and `fontSrc`. Also loaded via `next/font/google` at build time |
-| Phosphor Icons CDN | Browser to `unpkg.com` | None | Allowed in Helmet `scriptSrc`. Provides `ph`, `ph-bold`, `ph-fill` icon classes |
-| MongoDB Atlas or local MongoDB | Backend to `MONGO_URI` | Connection string | Primary datastore for `User`, `Student`, `Report`, `StudentReport`, `MdbFile` collections |
-| ML microservice | Backend to `ML_API_URL` (default `http://ml-api:8000` in Compose, `http://127.0.0.1:8000` fallback) | `X-API-Key: ML_API_SECRET` header | Risk prediction (`/predict/risk`, `/predict/batch`) and Access ETL (`/etl/process-mdb`) |
-| SMTP or email provider | None | None | No email sending exists. Counselor assignment is matched by email string against the `User` collection, not by sending mail |
-
-### Environment Schema
-
-Root `.env` keys (also injected into Compose services):
-
-| Variable | Required | Default | Consumed By |
-| :--- | :---: | :--- | :--- |
-| `JWT_SECRET` | Yes (backend and frontend fail closed without it; backend calls `process.exit(1)` when `NODE_ENV !== test`) | None | Backend `jsonwebtoken` sign and verify; frontend Edge `jose` verify in `middleware.js` |
-| `JWT_ISSUER` | No | `tvetmara-backend` | Both sign options and verify options (`JWT_VERIFY_OPTIONS`, `JWT_SIGN_OPTIONS`) |
-| `JWT_AUDIENCE` | No | `tvetmara-dashboard` | Both sign options and verify options |
-| `GEMINI_API_KEY` | Yes for AI chat (route returns HTTP 500 without it) | None | `backend/items.js` `POST /api/ai/chat` |
-| `CORS_ORIGIN` | No | `http://localhost:3000,http://localhost:8080` | `backend/server.js` CORS allowlist, comma-split and trimmed |
-| `MONGO_URI` | No | `mongodb://mongodb:27017/ikmb-dashboard` in Compose; `mongodb://127.0.0.1:27017/ikmb-dashboard` in scripts; `mongodb://localhost:27017/tvetmara_db` in legacy `seed.js` | Mongoose connect, skipped when `NODE_ENV=test` |
-| `ML_API_URL` | No | `http://ml-api:8000` in Compose; `http://127.0.0.1:8000` fallback in code | `items.js` ETL and prediction callers, `repredict-status.js` |
-| `ML_API_SECRET` | Yes for ML POST routes (ML exits with code 1 without it; backend sends it as `X-API-Key`) | None | `ML/ml.py` `check_auth`, backend ETL and batch callers |
-| `BACKEND_URL` | No (frontend only, from `.env.local` or Compose) | `http://127.0.0.1:5000` in code; `http://backend:5000` in Compose; `http://127.0.0.1:5000` in `.env.local` | `src/app/actions.js` login fetch and `src/app/api/[...proxy]/route.js` proxy target |
-| `PORT` | No (backend only) | `5000` | `backend/server.js` listener |
-
-`backend/.env.example` documents `PORT`, `MONGO_URI`, `JWT_SECRET`, `JWT_ISSUER`, `JWT_AUDIENCE`, `ML_API_URL`, `ML_API_SECRET`, `GEMINI_API_KEY`, `CORS_ORIGIN` with placeholder values.
-
-## 2. Directory Tree & Module Manifest
-
-Indented tree of key source directories (excluding `node_modules`, `.next`, `mongodb_data`, `mdb_extracted` CSV dumps, and build output):
-
-```text
-/
-├── .github/workflows/ci.yml
-├── Containerfile.frontend
-├── compose.yml
-├── middleware.js
-├── next.config.mjs
-├── tailwind.config.js
-├── postcss.config.js
-├── jsconfig.json
-├── vitest.config.js
-├── .eslintrc.json
-├── package.json
-├── diagnostics.js
-├── public/
-│   ├── logo-tvetmara.jpg
-│   └── vite.svg
-├── src/
-│   ├── app/
-│   │   ├── layout.jsx
-│   │   ├── page.jsx
-│   │   ├── actions.js
-│   │   ├── globals.css
-│   │   ├── api/[...proxy]/route.js
-│   │   ├── staff-dashboard/page.jsx
-│   │   ├── student-dashboard/page.jsx
-│   │   └── student-profile/page.jsx
-│   ├── components/
-│   │   ├── Sidebar.jsx
-│   │   ├── KpiCard.jsx
-│   │   ├── StudentModal.jsx
-│   │   ├── StudentListGrid.jsx
-│   │   ├── StudentDetailModal.jsx
-│   │   ├── JobCard.jsx
-│   │   ├── ReportFormModal.jsx
-│   │   ├── GenerateReportModal.jsx
-│   │   ├── auth/LoginForm.jsx
-│   │   ├── dashboard/StaffDashboardClient.jsx
-│   │   ├── dashboard/StudentDashboardClient.jsx
-│   │   ├── dashboard/StudentProfileClient.jsx
-│   │   ├── dashboard/CounselorDashboardClient.jsx
-│   │   ├── dashboard/MergedLaporanTab.jsx
-│   │   ├── dashboard/AppointmentCalendar.jsx
-│   │   └── ui/dashboard-kit.jsx
-│   │   └── ui/AttachmentPreview.jsx
-│   ├── lib/
-│   │   ├── auth.js
-│   │   ├── client-auth.js
-│   │   ├── roles.js
-│   │   ├── heuristics.js
-│   │   └── use-file-preview.js
-│   └── __tests__/Login.test.jsx
-├── backend/
-│   ├── server.js
-│   ├── auth.js
-│   ├── auth.model.js
-│   ├── items.js
-│   ├── item.model.js
-│   ├── reports.js
-│   ├── studentReports.js
-│   ├── repredict-status.js
-│   ├── seed.js
-│   ├── seed-admin.js
-│   ├── package.json
-│   ├── Containerfile.backend
-│   ├── .env.example
-│   ├── middleware/authMiddleware.js
-│   ├── models/User.js
-│   ├── models/Student.js
-│   ├── models/Report.js
-│   ├── models/StudentReport.js
-│   ├── models/MdbFile.js
-│   ├── db/sedut_mdb_tulen.py
-│   ├── db/inspect_mdb_linux.py
-│   ├── db/prepare_ml_data_3mdb.py
-│   ├── db/relabel_option2.py
-│   ├── db/data_tvet_muktamad.json
-│   ├── uploads/certificates/
-│   ├── uploads/mdb/
-│   ├── uploads/referrals/
-│   ├── uploads/reports/
-│   └── __tests__/auth.test.js
-│   └── __tests__/items.test.js
-└── ML/
-    ├── ml.py
-    ├── requirements.txt
-    ├── test_ml.py
-    ├── train_and_evaluate.py
-    ├── train_and_evaluate_v4.py
-    ├── Containerfile
-    ├── model_ai_risiko_lengkap_v3.pkl
-    └── model_ai_risiko_lengkap_v4.pkl
-```
-
-### Module Breakdown
-
-| Path / Module | Purpose | Key Exports / Responsibilities |
-| :--- | :--- | :--- |
-| `middleware.js` | Edge route guard for all non-API, non-static routes | `middleware(request)` verifies HttpOnly `ikmbToken` with `jose.jwtVerify` using issuer and audience, redirects authenticated users away from `/` and `/login` to role dashboard, redirects unauthenticated users to `/`, enforces staff-only `/staff-dashboard` and `/student-profile` and student-only `/student-dashboard`; `config.matcher` excludes `api`, `_next/static`, `_next/image`, `favicon.ico`, `assets` |
-| `next.config.mjs` | Next.js standalone build plus upload rewrite | `output: 'standalone'`; `rewrites()` maps `/uploads/:path*` to `http://backend:5000/uploads/:path*` |
-| `src/app/layout.jsx` | Root HTML shell, font, metadata, icon CDN | `RootLayout({children})`; `metadata { title: 'TVETMARA Besut - Papan Pemuka Pintar' }`; Plus Jakarta Sans setup; Phosphor `<Script>` |
-| `src/app/page.jsx` | Public login route `/` | `LoginPage` renders `LoginForm`; `dynamic = 'force-dynamic'`; no cookie reads (middleware handles redirects) |
-| `src/app/actions.js` | Server Actions for login and logout | `loginAction(prevState, formData)` posts to backend login, sets `user` and `ikmbToken` cookies, redirects by role; `logoutAction()` deletes both cookies and redirects to `/` |
-| `src/app/api/[...proxy]/route.js` | Authenticated API proxy for browser callers without token access | `GET`, `POST`, `PUT`, `PATCH`, `DELETE` handlers via shared `proxyRequest`; injects `Authorization: Bearer <ikmbToken>`; forwards query string and body blob to `BACKEND_URL`; streams backend response; returns 500 JSON on connection failure |
-| `src/app/staff-dashboard/page.jsx` | Staff route entry | Renders `StaffDashboardClient`; `force-dynamic` |
-| `src/app/student-dashboard/page.jsx` | Student route entry | Renders `StudentDashboardClient`; `force-dynamic` |
-| `src/app/student-profile/page.jsx` | Student detail route entry with query parameter | Async component reads `searchParams.id` defaulting to `TVET001`, renders `StudentProfileClient studentId` |
-| `src/app/globals.css` | Tailwind directives plus full motion and mobile utility system | Keyframes `fadeIn`, `slideInLeft`, `slideInRight`, `slideUp`, `scaleIn`, `floatSoft`, `shimmer`; utilities `stagger-1` to `stagger-8`, `anim-fill`, `skeleton-shimmer`, `touch-target`, `text-responsive-sm` to `text-responsive-2xl`, `no-select`, `scroll-smooth-mobile`, `safe-area-top`, `safe-area-bottom`, `pb-safe` |
-| `src/lib/auth.js` | Server-side cookie readers | `getStoredUser()`, `getToken()`, `getDashboardPathForRole(role)` |
-| `src/lib/client-auth.js` | Client-side cookie readers | `getClientUser()` parses `document.cookie`; `getClientToken()` returns sentinel `"proxy-handled"` |
-| `src/lib/roles.js` | Role taxonomy | `ROLES` maps `admin` to Penyelaras in group staff, `counselor` to Kaunselor in group staff, `user` to Pelajar in group student; `getRoleLabel(role)`; `isStaff(role)` |
-| `src/lib/heuristics.js` | Client-side employability formulas | `calculateEmployability(cgpa, attendance)` computes `(cgpa / 4) * 40 + attendance * 0.6`; `calculateTopPerformerScore(cgpa, attendance)` computes `(cgpa / 4) * 60 + attendance * 0.4`; both clamp to 100 and round |
-| `src/lib/use-file-preview.js` | Controlled file selection with validation and object-URL preview | `MAX_ATTACHMENT_BYTES` (5 MB); `formatFileSize(bytes)`; `useFilePreview({acceptTypes, maxBytes})` returns `{ file, previewUrl, error, selectFile, clear }`; validates size then extension and MIME substring |
-| `src/components/auth/LoginForm.jsx` | Split-screen login UI with Server Action form | `LoginForm` plus inner `SubmitButton` using `useActionState(loginAction)` and `useFormStatus`; left brand panel (Unsplash image, brain icon, headline) and right form panel (logo, email, password with defaults `admin@ikmb.edu.my` and `password123`, error box) |
-| `src/components/Sidebar.jsx` | Responsive navigation drawer | Props `navItems`, `activeTab`, `setActiveTab`, `isSidebarOpen`, `setIsSidebarOpen`, `currentUser`, `handleLogout`, `profileImage`; Escape-to-close and mobile body scroll lock; avatar or initials; role label via `getRoleLabel` |
-| `src/components/KpiCard.jsx` | Metric card with progress bar | Props `title`, `value`, `isLoading`, `icon`, `iconBg`, `iconColor`, `barColor`, `barWidth`, `subtitle`, `delay`; skeleton shimmer when loading; animated width bar |
-| `src/components/StudentModal.jsx` | Add and edit student dialog | Props `isOpen`, `onClose`, `editingStudent`, `formData`, `handleInputChange`, `handleSubmit`; outside-click and Escape dismissal; body scroll lock; fields for ID, name, CGPA, attendance, certification, course, status |
-| `src/components/StudentListGrid.jsx` | Searchable student grid with course and risk filters | Props `students`, `onViewProfile`, `onAddStudent`, `readOnly`; local `search`, `filter`, `riskFilter`; `courseMap` for seven course codes; risk chips with live counts via `getRiskMeta`; staggered cards with avatar, course, risk badge, ID, CGPA |
-| `src/components/StudentDetailModal.jsx` | Read-only appointment and report viewer | Props `kind`, `appointment`, `report`, `item`, `onClose` (plus unused `onDownload`, `onPrint`, `onShare`); resolves unified `data`; renders appointment block (date, priority, counselor, reason, notes) or report block (message, PDF iframe); footer download and print links |
-| `src/components/JobCard.jsx` | Career recommendation card | Prop `job { icon, match, title, company }`; match badge with sparkle icon; static `Mohon Sekarang` button with no handler |
-| `src/components/ReportFormModal.jsx` | Staff-to-counselor referral composer | Props `isOpen`, `onClose`, `student`, `interventionType`; local `reason`, `priority`, `scheduledDate`, `counselorId`, `counselors`, `isSubmitting`, `toast`; uses `useFilePreview`; fetches counselor list from `/api/auth/users`; posts multipart `FormData` to `/api/reports` |
-| `src/components/GenerateReportModal.jsx` | Staff-to-student report composer | Props `isOpen`, `onClose`, `student`, `skillGap`; local `title`, `message`, `isSubmitting`, `toast`; uses `useFilePreview({ acceptTypes: ['pdf'] })`; prefills title on open transition via `prevIsOpenRef`; posts multipart `FormData` with `ploScores` JSON and computed employability to `/api/student-reports` |
-| `src/components/ui/dashboard-kit.jsx` | Shared primitives, risk taxonomy, date formatting | `formatMsDate(value, withTime)`; `toneClasses`; `Badge`; `StatCard`; `SectionCard`; `PillTabs`; `EmptyState`; `SkeletonList`; `getRiskMeta(risk)` mapping Tinggi, Sederhana, Rendah; `RiskBadge` |
-| `src/components/ui/AttachmentPreview.jsx` | File row with inline image or PDF preview | Props `file`, `previewUrl`, `onRemove`; detects PDF versus image; shows name, formatted size, open link, remove button, and constrained preview pane |
-| `src/components/dashboard/StaffDashboardClient.jsx` | Staff workspace with seven tabs, charts, AI chat, student CRUD, MDB pipeline | No props; owns semester, student, AI chat, and MDB state; fetches `/api/semesters`, `/api/students`, `/api/data/mdb-files`, `/api/ai/chat`; embeds `Sidebar`, `KpiCard`, `StudentListGrid`, `StudentModal`, `CounselorDashboardClient`, Chart.js Bar |
-| `src/components/dashboard/StudentDashboardClient.jsx` | Student workspace with five tabs, radar chart, certificates, inbox, career | No props; owns semester, selected student, skill gap, certificate state; fetches `/api/semesters`, `/api/students`, `/api/students/:id/skill-gap`, profile image and certificate endpoints; embeds `Sidebar`, `JobCard`, `MergedLaporanTab`, Chart.js Radar |
-| `src/components/dashboard/StudentProfileClient.jsx` | Per-student 360-degree profile with three inner tabs | Prop `studentId`; fetches `/api/students/:id/skill-gap`; renders header card with status badge and export actions plus personal, academic (Bar plus Line combo), and skills (Radar plus employability plus intervention buttons) sections; embeds `ReportFormModal` and `GenerateReportModal` |
-| `src/components/dashboard/CounselorDashboardClient.jsx` | Counseling queue with six workflow tabs plus calendar | Prop `currentUser`; fetches `/api/reports` and `/api/student-reports`; implements accept, reject, schedule, complete, reset, and delete via `PATCH /api/reports/:id` and `DELETE /api/student-reports/:id`; embeds `AppointmentCalendar` and kit primitives |
-| `src/components/dashboard/MergedLaporanTab.jsx` | Student inbox merging reports and appointments | Prop `user`; fetches `/api/student-reports` and `/api/reports/mine`; normalizes via `normalizeLaporanItems`; marks reports read via `GET /api/student-reports/:id`; renders `PillTabs` filters and `StudentDetailModal`; exports `formatLaporanDate` and `normalizeLaporanItems` |
-| `src/components/dashboard/AppointmentCalendar.jsx` | Month calendar for scheduled counseling sessions | Props `reports`, `onComplete`; groups by day key `YYYY-MM-DD`; Monday-first grid; mobile bottom sheet and desktop side panel; upcoming list; no network calls |
-| `src/__tests__/Login.test.jsx` | Frontend smoke test | Mocks `next/navigation`, `next/script`, `@/app/actions`; asserts `LoginForm` renders heading, labels, and submit button |
-| `backend/server.js` | Express boot, security, static serving, route mounting, error handling | Fail-closed `JWT_SECRET` check; Helmet CSP; CORS allowlist; `uploads/certificates`, `uploads/referrals`, `uploads/reports` static mounts; Swagger at `/api/docs`; Mongo connect with `Processing` to `Saved` recovery; mounts `/api/auth`, `/api/reports`, `/api/student-reports`, `/api`; health endpoint; global error handler; `PORT` listener |
-| `backend/auth.js` | Login and user-listing router | `GET /api/auth/users` (staff only) returns sanitized users; `POST /api/auth/login` (public) validates email and password and returns user plus JWT |
-| `backend/auth.model.js` | Credential store and JWT Mint | `JWT_SIGN_OPTIONS` (HS256, 8-hour expiry, issuer, audience); `readLoginDatabase()` from `User` collection; `sanitiseUser()`; `getAllLoginUsers()`; `getPublicLoginUsers()`; `authenticateUser(email, password)` with `bcrypt.compare` and `jwt.sign` |
-| `backend/items.js` | Student, dataset, upload, prediction, and AI chat router | Endpoints for semesters, student CRUD, skill gap, certificates, profile image, manual prediction, MDB upload, MDB list, MDB process, MDB delete, Gemini chat; includes `executeEtlAndSync`, Gemini helpers, `TVET_KNOWLEDGE` grounding, history sanitizer, and Multer error middleware |
-| `backend/item.model.js` | Student normalization, metrics, live prediction, Mongo CRUD | `certificationScores`; `normaliseStudent(record)` with dropout-risk override rules; `getStudentsDataset`, `buildMetrics`, `buildInsight`; `getRealAIPrediction(features)` calling ML `/predict/risk` with heuristic fallback; `getAllStudents`, `getStudentById`, `getStudentSkillGapById`; `createStudent`, `updateStudent`, `deleteStudent` |
-| `backend/reports.js` | Counselor referral router | `POST /api/reports` creates scheduled intervention with counselor email validation and optional referral file; `GET /api/reports` lists all for admin and pending plus owned for counselor; `GET /api/reports/mine` lists upcoming appointments for the logged-in student; `GET /api/reports/:id` with ownership check; `PATCH /api/reports/:id` unified state machine for accept, reject, schedule, complete, reset, and notes-only updates |
-| `backend/studentReports.js` | Student inbox report router | `POST /api/student-reports` creates message, letter, or full report with PLO scores and employability; `GET /api/student-reports` scopes by role (student sees own, counselor sees authored, admin sees all); `GET /api/student-reports/:id` with author, owner, and admin checks plus automatic `readByStudent` marking; `DELETE /api/student-reports/:id` restricted to admin or author |
-| `backend/repredict-status.js` | Batch backfill script for risk labels | Loads all `Student` documents, chunks into groups of 500, posts to ML `/predict/batch` without API key, bulk-writes `Status_Pelajar`, logs processed and skipped counts |
-| `backend/seed.js` | Full database seeder | Reads `db/data_tvet_muktamad.json` when present; upserts `Student` snapshots and bound `user` logins with default password `password123`; upserts demo `admin@ikmb.edu.my`, `counselor@ikmb.edu.my`, `user@ikmb.edu.my`; preserves existing passwords and certificates via `$setOnInsert` |
-| `backend/seed-admin.js` | Demo-account-only seeder | Upserts the same three demo accounts without touching student data |
-| `backend/middleware/authMiddleware.js` | JWT guards | `verifyToken` requires `Authorization: Bearer` and verifies HS256 with issuer and audience; `requireAdmin` allows only `admin`; `requireStaff` allows `admin` and `counselor`; `requireOwnershipOrAdmin` allows staff plus the student whose `studentId` matches `:studentId` |
-| `backend/models/User.js` | Login account schema | Fields `email` (required, unique), `password` (required hash), `role` (enum `admin`, `counselor`, `user`, default `user`), `displayName`, `studentId` (default null) |
-| `backend/models/Student.js` | Per-semester student snapshot schema | Fields `ID_Pelajar`, `Nama`, `Kursus`, `Semester`, `Kehadiran_Pct`, `CGPA`, nine `PLO_1` to `PLO_9` strings, `Status_Pelajar`, `No_KP`, `No_Telefon`, `Alamat`, `academicHistory` array, `uploadedCertificates` array, `sourceDataset` (default `unknown`, indexed), `profileImage` |
-| `backend/models/Report.js` | Counseling referral schema with timestamps | Fields `studentId` (required, indexed), `studentName`, `course`, `cgpa`, `attendance`, `riskLevel`, `interventionType` (enum `kaunseling`, `klinik`, `softskills`), `reason`, `priority` (`urgent`, `normal`), `status` (`pending`, `accepted`, `scheduled`, `completed`, `rejected`), `adminEmail`, `counselorId`, `counselorNotes`, `scheduledDate`, `fileName`, `filePath` |
-| `backend/models/StudentReport.js` | Student inbox report schema with timestamps | Fields `studentId` (required, indexed), `studentName`, `course`, `cgpa`, `attendance`, `riskLevel`, `semester`, `ploScores` array, `employability`, `authorEmail`, `authorRole`, `authorName`, `title`, `message`, `fileName`, `filePath`, `reportType` (`message`, `letter`, `full`), `readByStudent` |
-| `backend/models/MdbFile.js` | MDB ingestion ledger schema | Fields `datasetName`, `originalName`, `filePath`, `fileSize`, `status` (enum `Saved`, `Processing`, `Processed`, `Failed`), `recordsProcessed`, `uploadDate`, `processedDate` |
-| `backend/db/` | ETL preparation scripts and extracted datasets | `sedut_mdb_tulen.py`, `inspect_mdb_linux.py`, `prepare_ml_data_3mdb.py`, `relabel_option2.py`, `data_tvet_muktamad.json`, plus `mdb_extracted` CSV dumps for intakes `JJ2025`, `JD2025`, `JJ2026` (tables `pelajar`, `Daftar_Subjek`, `GPA`, `Detail_Result`, `Anugerah`) |
-| `ML/ml.py` | FastAPI prediction and ETL service | `GET /` health; `POST /predict/risk` single prediction; `POST /predict/batch` ordered batch prediction; `POST /etl/process-mdb` multipart Access extraction; feature engineering (`PLO_Avg`, `PLO_Variance`); `check_auth` via `X-API-Key`; model load from `model_ai_risiko_lengkap_v4.pkl`; `mdb-export` helpers with timeouts |
-| `ML/train_and_evaluate.py` | Baseline training script | Loads `../backend/db/ml_training_data_real.csv`, coerces numerics, engineers `PLO_Avg` and `PLO_Variance`, stratified 80-20 split when possible, `GridSearchCV` over RandomForest hyperparameters with 5-fold CV and `f1_weighted`, prints accuracy plus classification report plus confusion matrix, saves `model_ai_risiko_lengkap_v4.pkl` |
-| `ML/train_and_evaluate_v4.py` | Leakage-aware training script | Same as baseline plus student-group-aware `GroupShuffleSplit` when `No_Pelajar` is duplicated, dynamic CV folds (5, 3, or 2 based on minority class size), attendance default fill 80, logs train and test student counts |
-| `ML/test_ml.py` | ML contract tests | `test_health_check`, `test_predict_risk_valid_data`, `test_predict_risk_invalid_data` using `TestClient` |
-| `diagnostics.js` | `mongosh` database health script | Counts students and users, finds duplicate `ID_Pelajar` values, groups by `Kursus`, counts whitespace-padded IDs, lists `mdbfiles` ledger, samples 10 students |
-| `.github/workflows/ci.yml` | Continuous integration pipeline | Jobs `frontend` (Node 20 install, Vitest, Next build with `BACKEND_URL`), `backend` (Node 20 install, Jest), `ml-service` (Python 3.9, `mdbtools`, pip install, pytest), `docker-build` (builds all three Containerfiles, gated on prior jobs) |
-
-## 3. Role-Based Access Control (RBAC) & Permissions
-
-### Role Definitions
-
-| Role | Malay Label | Group | Intended Purpose |
-| :--- | :--- | :--- | :--- |
-| `admin` | Penyelaras | Staff | Full control: manage students, upload and process `.mdb` datasets, delete datasets, send reports to students, create counseling referrals, reset counseling states, view all referrals and all student reports, use AI chat |
-| `counselor` | Kaunselor | Staff | Counseling workflow: view assigned and pending referrals, accept, schedule, complete, and reject appointments, view the calendar, manage own sent reports, send reports to students, create referrals, use AI chat. Cannot access the MDB data pipeline tab and cannot delete MDB files |
-| `user` | Pelajar | Student | Personal workspace: view own performance, radar skill gap, employability, career matches, course suggestions, upload own certificates and profile image, read own inbox reports and own upcoming appointments. When the account has a bound `studentId`, the dashboard is restricted to that single student record and the student selector is hidden |
-
-Guest (no valid `ikmbToken`) has no access to any dashboard route and is redirected to `/`.
-
-JWT claims issued at login: `{ email, role, studentId }` with `expiresIn: 8h`, `algorithm: HS256`, `issuer: tvetmara-backend`, `audience: tvetmara-dashboard`. The Edge middleware reads `email`, `role`, and `studentId` from the verified payload. The `user` cookie mirrors `{ email, role, displayName, studentId }` for display purposes only and is never trusted for authorization at the edge or in the backend.
-
-### Permission Matrix
-
-| Resource / Route / Action | Guest | Student (`user`) | Counselor | Admin |
-| :--- | :---: | :---: | :---: | :---: |
-| `GET /` login page | ✅ | Redirect to `/student-dashboard` when token valid | Redirect to `/staff-dashboard` when token valid | Redirect to `/staff-dashboard` when token valid |
-| `GET /staff-dashboard` | Redirect to `/` | Redirect to `/student-dashboard` | ✅ | ✅ |
-| `GET /student-dashboard` | Redirect to `/` | ✅ | Redirect to `/staff-dashboard` | Redirect to `/staff-dashboard` |
-| `GET /student-profile?id=:id` | Redirect to `/` | Redirect to `/student-dashboard` (Edge treats as staff route) | ✅ | ✅ |
-| `POST /api/auth/login` | ✅ | ✅ | ✅ | ✅ |
-| `GET /api/auth/users` | ❌ | ❌ | ✅ | ✅ |
-| `GET /api/semesters` | ❌ | ✅ | ✅ | ✅ |
-| `GET /api/students` (list) | ❌ | Own record only (requires bound `studentId`, otherwise empty array) | ✅ all | ✅ all |
-| `POST /api/students` | ❌ | ❌ | ✅ | ✅ |
-| `PUT /api/students/:studentId` | ❌ | ❌ | ✅ | ✅ |
-| `DELETE /api/students/:studentId` | ❌ | ❌ | ✅ | ✅ |
-| `GET /api/students/:studentId` | ❌ | Own `:studentId` only | ✅ any | ✅ any |
-| `GET /api/students/:studentId/skill-gap` | ❌ | Own `:studentId` only | ✅ any | ✅ any |
-| `POST /api/students/:studentId/certificates` | ❌ | Own `:studentId` only | ✅ any | ✅ any |
-| `DELETE /api/students/:studentId/certificates/:certId` | ❌ | Own `:studentId` only | ✅ any | ✅ any |
-| `POST /api/students/:studentId/profile-image` | ❌ | Own `:studentId` only | ✅ any | ✅ any |
-| `POST /api/predict/manual` | ❌ | ❌ | ✅ | ✅ |
-| `POST /api/data/upload-mdb` | ❌ | ❌ | ❌ | ✅ |
-| `GET /api/data/mdb-files` | ❌ | ❌ | ❌ | ✅ |
-| `POST /api/data/process-mdb/:id` | ❌ | ❌ | ❌ | ✅ |
-| `DELETE /api/data/mdb-files/:id` | ❌ | ❌ | ❌ | ✅ |
-| `POST /api/ai/chat` | ❌ | ❌ | ✅ rate-limited | ✅ rate-limited |
-| `POST /api/reports` (create referral) | ❌ | ❌ | ✅ | ✅ |
-| `GET /api/reports` (list) | ❌ | ❌ | Pending plus own assigned only | ✅ all |
-| `GET /api/reports/mine` | ❌ | Own upcoming (`accepted`, `scheduled`) only | ✅ (no student filter applied, returns empty unless `studentId` present) | ✅ |
-| `GET /api/reports/:id` | ❌ | ❌ | Pending plus own assigned only | ✅ |
-| `PATCH /api/reports/:id` (accept, reject, schedule, complete, reset) | ❌ | ❌ | Pending plus own assigned only (admin-only reset to `pending` is still reachable by counselor only for owned records) | ✅ |
-| `POST /api/student-reports` | ❌ | ❌ | ✅ | ✅ |
-| `GET /api/student-reports` | ❌ | Own `studentId` only | Authored by own email only | ✅ all |
-| `GET /api/student-reports/:id` | ❌ | Own record only (marks `readByStudent`) | Author or admin | ✅ |
-| `DELETE /api/student-reports/:id` | ❌ | ❌ | Author or admin | ✅ |
-| `POST /predict/risk` (ML service) | ❌ without `X-API-Key` | ❌ without `X-API-Key` | ❌ without `X-API-Key` (backend calls with key) | ❌ without `X-API-Key` (backend calls with key) |
-| `POST /predict/batch` (ML service) | ❌ without `X-API-Key` | ❌ without `X-API-Key` | ❌ without `X-API-Key` | ❌ without `X-API-Key` |
-| `POST /etl/process-mdb` (ML service) | ❌ without `X-API-Key` | ❌ without `X-API-Key` | ❌ without `X-API-Key` | ❌ without `X-API-Key` |
-
-### Enforcement Mechanism
-
-- Edge layer (`middleware.js` with `jose`): verifies the HttpOnly `ikmbToken` on every matched request using `JWT_SECRET`, `JWT_ISSUER`, and `JWT_AUDIENCE`. Invalid, expired, or missing tokens are treated as unauthenticated. Staff detection is `role === 'admin' || role === 'counselor'`. Login pages redirect authenticated staff to `/staff-dashboard` and authenticated students to `/student-dashboard`. Protected routes redirect unauthenticated requests to `/`. Staff routes (`/staff-dashboard`, `/student-profile`) redirect non-staff to `/student-dashboard`. Student routes (`/student-dashboard`) redirect staff to `/staff-dashboard`. The matcher excludes `api`, `_next/static`, `_next/image`, `favicon.ico`, and `assets`.
-- Server Action layer (`src/app/actions.js`): `loginAction` delegates credential validation to the backend and only sets cookies on HTTP success. `logoutAction` deletes both cookies. No role logic beyond choosing the post-login redirect path.
-- Client layer (`src/lib/roles.js`, `getClientUser`, per-component checks): `ROLES` defines group membership. `StaffDashboardClient` filters out the `data` navigation item for non-admin staff. `StudentDashboardClient` computes `isRestrictedUser` as `role === 'user' && studentId` and restricts the visible list to the bound record. `StudentProfileClient` computes `isStaff` to gate the three intervention cards. `CounselorDashboardClient` computes `isAdmin` to gate the `Set Semula` reset button. These are UX conveniences; real authorization is rechecked server-side.
-- Backend layer (`backend/middleware/authMiddleware.js`): `verifyToken` requires `Authorization: Bearer <token>` and verifies HS256 with issuer and audience, returning HTTP 401 with `Token tidak sah atau telah luput.` on failure. `requireAdmin` returns HTTP 403 unless `role === 'admin'`. `requireStaff` returns HTTP 403 unless role is `admin` or `counselor`. `requireOwnershipOrAdmin` returns HTTP 403 unless the caller is staff or `req.user.studentId === req.params.studentId`. Multer upload middleware is always placed after authentication and role middleware so unauthenticated requests never write files to disk.
-- Proxy layer (`src/app/api/[...proxy]/route.js`): reads the HttpOnly cookie server-side and injects it as a Bearer header, so browser JavaScript never handles the JWT. Requests without a cookie are forwarded without a header and rejected by the backend with HTTP 401.
-- ML layer (`ML/ml.py` `check_auth`): requires `X-API-Key` header equal to `ML_API_SECRET` on all three POST endpoints, returning HTTP 401 `Unauthorized` otherwise. The public `GET /` health endpoint requires no key.
-
-## 4. Page Breakdown, UI Behaviors & Animations
-
-### Login (src/app/page.jsx + src/components/auth/LoginForm.jsx)
-
-- Route: `/` (also treats `/login` as login in middleware even though no `/login` page file exists).
-- Access Level: Public. Authenticated requests are redirected by Edge middleware before rendering.
-- Primary Function & User Flow:
-  1. User lands on a split-screen page. Left panel presents branding (background photo, brain icon, headline `Revolusi Bakat TVET dengan Kuasa AI.`, subcopy about graduate employability, two decorative blurred orbs). Right panel presents the login card (TVETMARA logo, `Selamat Kembali` heading, helper text, default-account hint disclosing `admin@ikmb.edu.my`, `user@ikmb.edu.my`, and password `password123`).
-  2. User submits email and password through a React Server Action form (`formAction` from `useActionState(loginAction)`).
-  3. `SubmitButton` disables itself while `useFormStatus().pending` is true and swaps its label to a spinning `ph-spinner-gap` icon plus `Memproses...`.
-  4. On backend success the server sets cookies and issues an HTTP redirect to `/staff-dashboard` for `admin` and `counselor` or `/student-dashboard` for `user`. On failure the same page re-renders with a red error box containing the backend message or `Gagal menyambung ke pelayan. Pastikan backend berjalan.` on network error.
-- Components Used: `LoginForm`, inner `SubmitButton`. No sidebar, no charts, no modals.
-- Animations & Visual Transitions:
-  - Type: Page entrance plus staggered field entrance plus decorative float plus button micro-interaction plus error pop-in.
-  - Implementation: Arbitrary Tailwind animations referencing `globals.css` keyframes: left panel `animate-[slideInLeft_0.6s_ease-out] anim-fill`; right panel `animate-[slideInRight_0.6s_ease-out] anim-fill`; headline `animate-[slideUp_0.5s_ease-out_0.2s] anim-fill`; subcopy `animate-[slideUp_0.5s_ease-out_0.35s] anim-fill`; header block `animate-[slideUp_0.5s_ease-out_0.15s] anim-fill`; email group `animate-[slideUp_0.5s_ease-out_0.25s] anim-fill`; password group `animate-[slideUp_0.5s_ease-out_0.35s] anim-fill`; submit wrapper `animate-[slideUp_0.5s_ease-out_0.45s] anim-fill`; error box `animate-[scaleIn_0.3s_ease-out]`; brain icon and orbs `animate-[floatSoft_3s_ease-in-out_infinite]`, `animate-[floatSoft_6s_ease-in-out_infinite]`, `animate-[floatSoft_8s_ease-in-out_infinite_1s]`; pending spinner `animate-spin`; submit button `transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]` with conditional `bg-blue-400 cursor-not-allowed` versus `bg-blue-600 hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-600/25`; inputs `transition-all duration-200` with `focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500`.
-  - Trigger: Route mount for all entrance and float animations; form pending state for spinner and disabled style; presence of `state.error` for error pop-in; hover and active pointer states for button scaling.
-  - Configuration/Props: Ease-out curves with explicit delays from 150 ms to 450 ms for stagger; `anim-fill` keeps pre-delay elements invisible; float loops infinitely with 3, 6, and 8 second periods.
-
-### Staff Dashboard (src/app/staff-dashboard/page.jsx + src/components/dashboard/StaffDashboardClient.jsx)
-
-- Route: `/staff-dashboard`.
-- Access Level: Protected, staff-specific (`admin`, `counselor`). Students are redirected to `/student-dashboard`. Within the page, the `data` tab renders only for `admin`.
-- Primary Function & User Flow:
-  1. On mount the client loads the user via `getClientUser()`, aborts to `/` when no token exists, fetches `GET /api/semesters`, selects the first `datasetName` as `activeDataset`, fetches students for that dataset, and (for admin) fetches `GET /api/data/mdb-files`. A polling interval refreshes the MDB list every 3 seconds while any record has status `Processing` or a process request is in flight.
-  2. Tab `overview` (Dashboard Overview): inspects three `KpiCard` metrics (total students, high-risk count, average employability), a Bar chart of nine PLO averages versus an 80-point target, a high-risk list (top 5) and a top-performer list (top 5). Clicking any student navigates to `/student-profile?id=<id>`.
-  3. Tab `prediction` (AI Prediction): searches and filters students through a combobox with risk chips (`Semua`, `Tinggi`, `Sederhana`, `Rendah` with live counts), selects one student to reveal a context card, then sends quick prompts or free text to `POST /api/ai/chat` with streaming Server-Sent Events rendering, markdown-lite formatting (bullets normalized to `•`, `**bold**` and `*italic*` parsed), auto-scroll via `chatEndRef`, and a JSON fallback when the response content type is JSON.
-  4. Tab `skills` (Skills Gap Analysis): reads a table of PLO label, average score, gap to target, and status (`Selamat` when average is at least 80, `Perlu Peningkatan` when at least 60, `Kritikal` otherwise).
-  5. Tab `pathways` (Learning Pathways): reads recommendation cards sorted by descending gap, each mapped through `pathwayMappings` to a course title, description, and action.
-  6. Tab `management` (Student Management): uses `StudentListGrid` search plus course plus risk filters, views profiles, opens `StudentModal` to add or edit records (`POST /api/students`, `PUT /api/students/:id`), and deletes records (`DELETE /api/students/:id`).
-  7. Tab `counselor` (Kaunseling & Intervensi): embeds `CounselorDashboardClient` with the current user for the full referral workflow.
-  8. Tab `data` (Pengurusan Data, admin only): enters a dataset name, selects an `.mdb` file, uploads via `POST /api/data/upload-mdb` with `FormData`, inspects the archive table, triggers `POST /api/data/process-mdb/:id`, deletes via `DELETE /api/data/mdb-files/:id`, and switches the active dataset through a semester `<select>`.
-- Components Used: `Sidebar`, `KpiCard`, `StudentModal`, `StudentListGrid`, `CounselorDashboardClient`, `RiskBadge` and `getRiskMeta` from `dashboard-kit`, Chart.js `Bar` with `CategoryScale`, `LinearScale`, `BarElement`, `Title`, `Tooltip`, `Legend`, heuristics `calculateEmployability` and `calculateTopPerformerScore`, Next `useRouter`, `logoutAction`, `getClientUser` and `getClientToken`.
-- Animations & Visual Transitions:
-  - Type: Tab fade, card rise with stagger, list stagger, hover lift, dropdown fade, context-card pop, chat slide, typing bounce, streaming pulse, spinner rotation, processing pulse, skeleton pulse.
-  - Implementation: Tab wrappers `animate-[fadeIn_0.3s_ease-in-out]`; PLO chart card `animate-[slideUp_0.4s_ease-out_0.2s] anim-fill`; risk and top panels `animate-[slideUp_0.4s_ease-out_0.3s]` and `0.35s`; list items `animate-[slideUp_0.3s_ease-out] anim-fill` with inline `animationDelay` computed as `350 + index * 60` ms and `400 + index * 60` ms; table rows `150 + index * 40` ms; pathway cards `100 + index * 80` ms with `hover:shadow-md hover:-translate-y-1 transition-all duration-300`; destructive rows `hover:bg-red-100 hover:shadow-sm hover:translate-x-1 transition-all duration-200`; filter chips `transition-all duration-200 active:scale-95`; AI dropdown `animate-[fadeIn_0.2s_ease-out]`; context card `animate-[scaleIn_0.3s_ease-out]`; split AI panels `animate-[slideInLeft_0.4s_ease-out]` and `animate-[slideInRight_0.4s_ease-out]`; chat empty state `animate-[fadeIn_0.5s_ease-out]` plus `animate-[floatSoft_4s_ease-in-out_infinite]`; messages `animate-[slideUp_0.3s_ease-out]`; typing dots `animate-bounce` with `[animation-delay:0.2s]` and `[animation-delay:0.4s]`; streaming cursor `animate-pulse`; send button `hover:shadow-lg hover:shadow-emerald-600/20 transition-all duration-200 active:scale-95`; spinner `animate-spin`; ETL badge `animate-pulse`; skeleton rows `animate-pulse`; status badges `animate-[fadeIn_0.4s_ease-in-out]` with processing state combining `animate-pulse` and `animate-spin`.
-  - Trigger: Route mount and tab switch for entrance; message append for chat slide; typing flag for bounce; streaming flag for pulse; `status === 'Processing'` for ETL pulse; hover for lift and shadow; click for chip scale.
-  - Configuration/Props: Chart.js Bar options `responsive: true`, `maintainAspectRatio: false`, y-axis 0 to 100, `animation: { duration: 800, easing: 'easeOutQuart' }`, container `h-80 w-full`, datasets `Purata Skor Institut (%)` in `#2563EB` with `borderRadius: 6` and `Sasaran 80` in `#E5E7EB`.
-
-### Student Dashboard (src/app/student-dashboard/page.jsx + src/components/dashboard/StudentDashboardClient.jsx)
-
-- Route: `/student-dashboard`.
-- Access Level: Protected, student-specific (`user`). Staff are redirected to `/staff-dashboard`. Restricted students (role `user` with bound `studentId`) see only their own record, lose the student selector, and gain an ID badge.
-- Primary Function & User Flow:
-  1. On mount the client loads the user, fetches `GET /api/semesters`, picks the first dataset, fetches `GET /api/students` or `GET /api/students?dataset=<name>`, restricts the list when applicable, and selects the first record.
-  2. Whenever the selected student or dataset changes, the client fetches `GET /api/students/:id/skill-gap` (with dataset query) and then `GET /api/students/:id` to hydrate `customCerts` from `uploadedCertificates`, toggling `isLoading` on each change.
-  3. Tab `dashboard` (Profil & Prestasi): views welcome header with `RiskBadge`, semester selector, three stat cards (employability via `calculateEmployability`, attendance percentage, CGPA), a Radar skill-gap chart with AI insight text, and a career teaser showing the top two entries from `careerMapping[kursus]` with a button that switches to the career tab.
-  4. Tab `profile` (Kemaskini Sijil Saya): clicks the avatar to open a file picker handled by `handleProfileImageChange` (posts `FormData { file }` to `/api/students/:id/profile-image`), views disabled name, ID, and course fields, adds certificates through name plus issuer plus file validated for presence (posts `FormData { name, issuer, file }` to `/api/students/:id/certificates`), and deletes certificates via `DELETE /api/students/:id/certificates/:certId`.
-  5. Tab `reports` (Laporan & Temujanji): embeds `MergedLaporanTab` with the current user.
-  6. Tab `career` (Padanan Kerjaya AI): reads a grid of `JobCard` entries for the student's course code.
-  7. Tab `courses` (Kursus Cadangan): reads a personalized card from `courseMappings[weakestPlo]` plus a static AWS card.
-- Components Used: `Sidebar` (with `profileImage` from `skillGap.student`), `JobCard`, `MergedLaporanTab`, Chart.js `Radar` with `RadialLinearScale`, `PointElement`, `LineElement`, `Filler`, `Tooltip`, `Legend`, `calculateEmployability`. Static maps `careerMapping` (seven course codes `ITW`, `DFK`, `DGA`, `SLR`, `DCG`, `SED`, `PPU`, each with two `{ title, company, match, icon }` entries), `getFullCourseName(code)`, `courseMappings` (nine PLO keys each with `{ title, desc, bg, btn }`), and `initialSkillGap` (nine zeroed PLO values with target 80).
-- Animations & Visual Transitions:
-  - Type: Tab fade, card hover shadow, dropzone hover, avatar overlay fade, button color transition.
-  - Implementation: Every tab wrapper `animate-[fadeIn_0.3s_ease-in-out]`; cards `group` with `hover:shadow-md transition`; file dropzone `hover:bg-slate-100 transition`; avatar overlay `opacity-0 group-hover:opacity-100 transition-opacity`; buttons `transition-colors`.
-  - Trigger: Route mount and tab switch for fade; hover for shadow and overlay; file selection for image and certificate list updates.
-  - Configuration/Props: Radar datasets `Data Pelajar` in `rgba(37,99,235,0.2)` fill with `#2563EB` border and `Target` in `rgba(16,185,129,0.1)` fill with `#10B981` border plus `borderDash: [5,5]`; options `maintainAspectRatio: false`, radial axis `beginAtZero: true`, `min: 0`, `max: 100`, ticks `stepSize: 20`; container `h-64 flex items-center justify-center`. Chart.js default animation applies because no custom duration is set.
-
-### Student Profile (src/app/student-profile/page.jsx + src/components/dashboard/StudentProfileClient.jsx)
-
-- Route: `/student-profile?id=:id` (defaults to `TVET001` when the query parameter is absent).
-- Access Level: Protected, staff route at the Edge (students are redirected away). The component additionally gates the three intervention cards behind `isStaff` so any non-staff renderer sees personal, academic, and skills content without referral buttons. Breadcrumb back navigates to `/staff-dashboard`, confirming staff as the primary audience.
-- Primary Function & User Flow:
-  1. On `studentId` change the client fetches `GET /api/students/:id/skill-gap`, shows a loading spinner while pending, and shows `Pelajar tidak dijumpai` when the result is null.
-  2. Left card shows the TVETMARA header with `StatusBadge`, avatar, name, ID, course, semester, certification, attendance, and action row: Edit (currently a no-operation button), Print (calls `window.print()`), Download JSON (creates a client-side Blob of `{ studentDetails, academicHistory, aiInsight, employabilityScore, ploScores }` named `Profil_Pelajar_<id>.json`), and `Jana Laporan / Surat` (opens `GenerateReportModal`).
-  3. Right panel switches three inner tabs. Tab `personal` shows derived email `<id>@student.ikmb.edu.my` plus national ID, phone, and address (or `Tiada Rekod`). Tab `academic` shows CGPA over 4.00 with a color-coded progress bar plus a Bar-plus-Line trend chart built from `academicHistory`. Tab `skills` shows an employability card, a Radar chart, a `DATA PLO BELUM LENGKAP` warning when any PLO score is zero, and three intervention cards (staff only) that open `ReportFormModal` with type `kaunseling`, `klinik`, or `softskills`.
-- Components Used: `ReportFormModal` (with `student` and `interventionType`), `GenerateReportModal` (with `student` and `skillGap`), Chart.js `Bar` and `Radar` with `CategoryScale`, `LinearScale`, `BarElement`, `BarController`, `LineController`, `Title`, `Tooltip`, `Legend`, `RadialLinearScale`, `PointElement`, `LineElement`, `Filler`, local `StatusBadge`, `getFullCourseName` with long diploma names, `getClientUser` and `getClientToken`.
-- Animations & Visual Transitions:
-  - Type: Page fade, panel slide-in from opposite sides, staggered column rise, tab color transition, card lift, avatar pop, chart entrance, warning pop, wand float, progress-bar growth.
-  - Implementation: Root `animate-[fadeIn_0.4s_ease-out]`; breadcrumb `animate-[slideUp_0.4s_ease-out]` with link `transition-colors duration-200`; left panel `animate-[slideInLeft_0.5s_ease-out_0.1s] anim-fill` with card `hover:shadow-md transition-shadow duration-300` and avatar `animate-[scaleIn_0.4s_ease-out_0.3s] anim-fill`; right panel `animate-[slideInRight_0.5s_ease-out_0.15s] anim-fill`; tab buttons `transition-all duration-200` with active `border-[#1251AA] text-[#1251AA]`; personal tab `animate-[fadeIn_0.3s]` with columns `animate-[slideUp_0.4s]` and `animate-[slideUp_0.4s_ease-out_0.1s]`; academic chart `animate-[slideUp_0.4s_ease-out_0.15s]`; employability card `animate-[slideUp_0.4s]` with wand `animate-[floatSoft_4s_ease-in-out_infinite]`; radar wrapper `animate-[slideUp_0.4s_ease-out_0.15s]`; warning `animate-[scaleIn_0.3s_ease-out]`; intervention cards `animate-[slideUp_0.4s_ease-out_0.2s]`, `0.3s`, `0.4s` with `anim-fill` and `hover:shadow-md hover:-translate-y-0.5 transition-all duration-300`; intervention buttons `transition-all duration-200 active:scale-95`; CGPA bar `transition-all duration-700 ease-out` with width `(cgpa / 4 * 100)%` and color `bg-red-500` below 2.5, `bg-amber-500` below 3.5, `bg-emerald-500` otherwise; employability computed as `Math.min(100, Math.round(cgpa / 4 * 40 + attendance * 0.6))`.
-  - Trigger: Route mount for root and panel slides; inner tab switch for tab fade; staff flag for intervention cards; zero PLO score for warning; hover for card lift.
-  - Configuration/Props: Combo trend chart datasets line GPA (`borderColor #2563EB`, `borderWidth 2`, `tension 0.3`, axis `y`) and bar attendance (`rgba(16,185,129,0.2)` fill, `#10B981` border, `borderRadius 4`, axis `y1`); dual axes `y` max 4 titled GPA and `y1` max 100 titled Kehadiran with `grid.drawOnChartArea: false`; `animation: { duration: 800, easing: 'easeOutQuart' }`; container `h-64`. Radar uses the same blue and green palette with radial 0 to 100 step 20 and container `h-72`.
-
-### Counseling Workspace (embedded via Staff Dashboard, src/components/dashboard/CounselorDashboardClient.jsx)
-
-- Route: No standalone URL. Rendered when staff selects the `counselor` tab as `<CounselorDashboardClient currentUser={user} />`.
-- Access Level: Staff-only by parent route. Inside, `counselor` executes the full workflow and `admin` gains the additional `Set Semula` action that resets `completed` and `rejected` records to `pending`. No Bearer header is sent; requests rely on cookies.
-- Primary Function & User Flow:
-  1. On mount the client fetches `GET /api/reports` and `GET /api/student-reports` in parallel, showing `SkeletonList` with four rows while loading.
-  2. Tab `calendar` renders `AppointmentCalendar` and completes sessions through `openCompleteModal`.
-  3. Tab `pending` accepts (`{ action: 'accepted' }`) or rejects (`{ action: 'rejected' }`) referrals with toast confirmation (`Rujukan diterima...`, `Rujukan ditolak`).
-  4. Tab `scheduled` (includes both `accepted` and `scheduled` records) schedules accepted referrals through a modal with a `datetime-local` input defaulting to tomorrow at 09:00 plus a notes field (`{ action: 'scheduled', scheduledDate, counselorNotes }`), completes scheduled sessions through a notes modal (`{ action: 'completed', counselorNotes }`), and reschedules existing sessions.
-  5. Tabs `completed` and `all` display reason, counselor notes, and attachments, with admin reset (`{ action: 'pending' }`).
-  6. Tab `sent-reports` lists student inbox reports with title, type, date, student, course, message, and PDF, and deletes them after confirmation (`DELETE /api/student-reports/:id`).
-  7. Toasts render fixed at the top and auto-dismiss after 3000 ms.
-- Components Used: `PillTabs`, `EmptyState`, `SkeletonList`, `Badge`, `formatMsDate`, `AppointmentCalendar`. Constants `STATUS_CONFIG` (pending amber, accepted blue, scheduled purple, completed green, rejected rose) and `INTERVENTION_LABELS` (kaunseling, klinik, softskills). No charts.
-- Animations & Visual Transitions:
-  - Type: Toast fade, card rise with stagger, modal fade plus rise, button press scale, spinner rotation.
-  - Implementation: Toast `animate-[fadeIn_0.3s_ease-out]`; cards `animate-[slideUp_0.3s_ease-out] anim-fill` with `animationDelay: index * 50` ms and `hover:shadow-md transition`; action buttons `transition active:scale-95 touch-target`; modal backdrop `animate-[fadeIn_0.2s_ease-out]` with panel `animate-[slideUp_0.3s_ease-out]`; submitting icon `animate-spin`.
-  - Trigger: Data arrival and filter change for card stagger; action result for toast; modal open for backdrop and panel animations.
-  - Configuration/Props: Tab counts derived from `reports` plus `sentReports.length`; `filteredReports` maps `pending` to status pending, `scheduled` to scheduled or accepted, `completed` to completed, and `all` to every record.
-
-### Student Inbox (embedded via Student Dashboard, src/components/dashboard/MergedLaporanTab.jsx)
-
-- Route: No standalone URL. Rendered when the student selects the `reports` tab as `<MergedLaporanTab user={user} />`.
-- Access Level: Student. The component fetches only when the `user` prop exists. Backend endpoints scope results to the logged-in student (`/api/student-reports` filters by `studentId`, `/api/reports/mine` filters by `studentId` and statuses `accepted` and `scheduled`).
-- Primary Function & User Flow:
-  1. When `user` becomes available the client runs `Promise.all` over `GET /api/student-reports` and `GET /api/reports/mine`, normalizes both collections with `normalizeLaporanItems`, sorts by `displayDate` descending, and stores the merged `items` array.
-  2. `PillTabs` filters (`all` Semua, `report` Laporan, `appointment` Temujanji) narrow the list with live counts. The header shows `Peti Masuk Laporan`, an unread badge, and a `Muat Semula` button.
-  3. Clicking an item sets `selectedItem` and, for unread reports, fires `GET /api/student-reports/:id` (which marks the record read server-side) and patches `readByStudent: true` locally.
-  4. Details render in `StudentDetailModal` with `kind` derived from `itemType`. Loading shows `SkeletonList` with four rows; empty filters show `EmptyState`.
-- Components Used: `PillTabs`, `Badge`, `EmptyState`, `SkeletonList`, `StudentDetailModal`. `SectionCard` and `formatMsDate` are imported but unused; local `formatLaporanDate` formats with `ms-MY` locale (`day 2-digit`, `month short`, `year numeric`, `hour 2-digit`, `minute 2-digit`, `-` on invalid input). Label maps `REPORT_TYPE_LABELS` (message to Mesej, letter to Surat, full to Laporan Penuh) and `INTERVENTION_LABELS` (kaunseling to Kaunseling, klinik to Klinik Akademik, softskills to Soft Skills).
-- Animations & Visual Transitions:
-  - Type: Badge pop, list rise with stagger, press scale, unread highlight.
-  - Implementation: Unread badge `animate-[scaleIn_0.3s_ease-out]`; refresh button `transition active:scale-95 touch-target`; list buttons `animate-[slideUp_0.3s_ease-out] anim-fill` with delay `index * 50` ms plus `active:scale-[0.98] hover:shadow-md transition touch-target`; unread style `border-blue-300 bg-blue-50/30 ring-1 ring-blue-200` versus read style `border-slate-200`; unread dot `w-2 h-2 rounded-full bg-blue-500`.
-  - Trigger: Fetch completion for badge; item arrival and filter change for stagger; click for press scale; `readByStudent` flag for highlight removal.
-  - Configuration/Props: Report normalization preserves `title`, `studentName`, `course`, `cgpa`, `attendance`, `riskLevel`, `message`, `filePath`, `fileName`, `reportType`, `readByStudent`, `authorName`, `displayDate` from `createdAt`, `ploScores`, and `employability`. Appointment normalization synthesizes `title` as `Temujanji: <interventionType>` with `reason`, `priority`, `status`, `scheduledDate`, `counselorId`, `counselorNotes`, and `displayDate` from `scheduledDate` or `createdAt`.
-
-### Appointment Calendar (embedded via Counseling Workspace, src/components/dashboard/AppointmentCalendar.jsx)
-
-- Route: No standalone URL. Rendered when the counselor selects the `calendar` tab as `<AppointmentCalendar reports onComplete={openCompleteModal} />`.
-- Access Level: Inherits staff-only counseling context. No network calls and no role checks inside; all data arrives through props.
-- Primary Function & User Flow:
-  1. The component filters props to `scheduledReports` (records with a `scheduledDate` and status `scheduled` or `accepted`), groups them by `dayKey(date)` formatted as `YYYY-MM-DD` with zero padding, and memoizes the map.
-  2. It renders a Monday-first month grid (Sunday index 0 mapped to offset 6), with previous and next month buttons resetting `selectedDay`.
-  3. Clicking a day sets `selectedDay` (toggling off on mobile when the same day is clicked again). Selected days use `bg-blue-50 border-blue-400 ring-1 sm:ring-2 ring-blue-300`; today uses `bg-blue-50/50 border-blue-200`. Day cells show up to one pill on mobile and two on desktop (`bg-red-100 text-red-700` for urgent, `bg-purple-100 text-purple-700` otherwise), plus `+N lagi` overflow text and a red dot when urgent items exist.
-  4. A side panel on desktop and a bottom sheet on mobile list `selectedDayReports` with time (via `toLocaleTimeString('ms-MY')`), intervention type, priority, attachment link, and a `Tandakan Selesai` button for `scheduled` records that calls `onComplete(report)`.
-  5. A `Temujanji Akan Datang` section sorts sessions by ascending `scheduledDate`; clicking an entry jumps the calendar to that day.
-- Components Used: None external. Pure JSX with Phosphor `ph-*` icons. Constants `DAY_NAMES` (Isn through Ahd), `MONTH_NAMES` (Januari through Disember), and `INTERVENTION_LABELS`. No charts.
-- Animations & Visual Transitions:
-  - Type: Bottom-sheet rise on mobile, detail fade on desktop, cell press scale, row hover.
-  - Implementation: Mobile sheet `animate-[slideUp_0.3s_ease-out]`; desktop detail `animate-[fadeIn_0.3s_ease-out]`; cells and buttons `transition active:scale-95 touch-target` with `hover:bg-slate-50`; rows `hover:bg-slate-50 transition`; upcoming cards `hover:shadow-sm transition`.
-  - Trigger: Day selection for sheet and detail animations; viewport width below 1024 px (tracked by a resize listener in `isMobile`) for sheet versus side-panel layout; hover for cell and row feedback.
-  - Configuration/Props: CSS grid `grid-cols-7` for the calendar and `grid lg:grid-cols-3` for the surrounding layout. All date grouping is memoized on `reports` and `currentMonth`.
-
-### Shared Modals and Building Blocks
-
-- `Sidebar.jsx`: Fixed mobile drawer (`fixed inset-y-0 left-0 z-30 w-64 transform transition-transform duration-300 ease-out shadow-2xl md:shadow-none` with `translate-x-0` versus `-translate-x-full`, static on desktop via `md:relative md:translate-x-0`) plus backdrop (`fixed inset-0 bg-black/50 backdrop-blur-sm z-20 md:hidden animate-[fadeIn_0.2s_ease-out]`). Navigation buttons use `transition-all duration-200` with active `bg-blue-50 text-blue-600 border-l-4 border-blue-600` and inactive `text-slate-500 hover:bg-slate-50 hover:text-slate-800 active:bg-slate-100`. Close and logout buttons use `transition-colors` with logout adding `active:scale-95` and `hover:bg-red-50 hover:text-red-600`. Escape key and backdrop click close the drawer; mobile open locks `document.body.style.overflow`.
-- `KpiCard.jsx`: Card `hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 animate-[slideUp_0.4s_ease-out] anim-fill` with `animationDelay` from the `delay` prop; icon wrapper `transition-transform duration-300 hover:scale-110`; loading value replaced by `skeleton-shimmer` span; progress bar `transition-all duration-700 ease-out` with width from `barWidth`.
-- `StudentModal.jsx`: Overlay `fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex justify-center items-center p-0 sm:p-4 animate-[fadeIn_0.2s_ease-out]`; panel `bg-white w-full h-full sm:h-auto sm:max-h-[90vh] sm:rounded-2xl overflow-y-auto sm:max-w-2xl animate-[slideUp_0.3s_ease-out]`; inputs `focus:ring-2 focus:ring-blue-500 transition-shadow`; buttons `transition-colors active:scale-95`; sticky header and footer with `safe-area-top`, `safe-area-bottom`, `touch-target`, `pb-safe`, `scroll-smooth-mobile`. Fullscreen on mobile, centered dialog on small screens and above.
-- `StudentListGrid.jsx`: Root `animate-[fadeIn_0.3s_ease-in-out]`; header `animate-[slideUp_0.4s_ease-out]`; course chips `animate-[slideUp_0.4s_ease-out_0.1s] anim-fill` with active `bg-[#0C2461] text-white shadow-md`; risk chips `animate-[slideUp_0.4s_ease-out_0.15s] anim-fill` as rounded pills with dot and count; empty state `animate-[scaleIn_0.3s_ease-out]`; cards `hover:shadow-lg hover:-translate-y-1 transition-all duration-300 animate-[slideUp_0.4s_ease-out] anim-fill` with `animationDelay: Math.min(index * 60, 480)` ms; avatar `transition-transform duration-300 group-hover:scale-105` (the parent card omits the `group` class so this scale never fires, which is a known dead hover).
-- `ReportFormModal.jsx`: Overlay `fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]`; panel `sm:max-w-lg animate-[slideUp_0.3s_ease-out]`; toast `animate-[scaleIn_0.2s_ease-out]`; submitting icon `animate-spin`; priority toggle and dropzone `transition touch-target active:scale-95` and `active:scale-[0.98]`. Counselor dropdown is populated from `/api/auth/users` filtered to `counselor`, defaulting to the first entry; submit is disabled while `isSubmitting` or when no counselors exist.
-- `GenerateReportModal.jsx`: Same overlay and panel animation as `ReportFormModal` with an emerald submit (`bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20`), PDF-only attachment handling, title prefill guarded by `prevIsOpenRef` so typing does not reset the form, and employability computed with the shared heuristic before posting.
-- `StudentDetailModal.jsx`: Overlay `fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]`; panel `sm:max-w-2xl animate-[slideUp_0.3s_ease-out]`; purple calendar header for appointments versus blue file header for reports; date via `formatMsDate`; priority pill `SEGERA` red versus `NORMAL` slate; footer download anchor and `window.open(filePath, '_blank')` print button with `active:scale-95`; report PDF rendered in an `h-64 sm:h-96` iframe.
-- `dashboard-kit.jsx`: `Badge` pill `animate-[scaleIn_0.25s_ease-out]`; `StatCard` card `animate-[slideUp_0.4s_ease-out] anim-fill` with delay prop and icon `hover:scale-110`; `SectionCard` wrapper `animate-[slideUp_0.4s_ease-out] anim-fill` with delay; `PillTabs` buttons `animate-[slideUp_0.3s_ease-out] anim-fill` with `index * 50` ms delay, active blue shadow versus inactive white border; `EmptyState` wrapper `animate-[fadeIn_0.4s_ease-out]` with icon `animate-[floatSoft_3s_ease-in-out_infinite]`; `SkeletonList` rows `skeleton-shimmer rounded-xl animate-[slideUp_0.3s_ease-out] anim-fill` with `index * 80` ms delay; `RiskBadge` pill `animate-[scaleIn_0.25s_ease-out]` with `title` tooltip and `ph-fill` icon. Risk mapping: `Tinggi` and `Bermasalah` map to `Risiko Tinggi` (red, `ph-warning-octagon`), `Sederhana` maps to `Risiko Sederhana` (amber, `ph-clock`), all other values including `Cemerlang`, `Rendah`, `Pending AI`, and undefined map to `Risiko Rendah` (emerald, `ph-check-circle`).
-- `AttachmentPreview.jsx`: Container `animate-[scaleIn_0.2s_ease-out] border rounded-xl bg-slate-50`; red PDF icon versus blue image icon; remove button `hover:text-red-500 hover:bg-red-50 active:scale-95`; image pane `bg-slate-100 max-h-48 sm:max-h-64` with contain; PDF pane `h-48 sm:h-64 bg-slate-200` with iframe; `Buka` link opens `previewUrl` in a new tab.
-- `JobCard.jsx`: Card `hover:border-blue-300 hover:shadow-md transition group animate-[slideUp_0.4s_ease-out]`; icon box `bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors`; action button `bg-slate-50 hover:bg-blue-600 hover:text-white transition active:scale-95 hover:shadow-lg`; match badge `ph-fill ph-sparkle` plus `<match> Match`.
-
-## 5. Data Flow & State Lifecycles
-
-### Backend to Component: Read Path
-
-1. Browser holds two cookies after login: readable `user` JSON and HttpOnly `ikmbToken` JWT.
-2. Dashboard clients call same-origin `/api/*` endpoints. The Next.js proxy injects the Bearer token server-side (or the request carries cookies that the backend verifies directly when called without the proxy prefix, depending on deployment). The backend `verifyToken` middleware validates issuer, audience, algorithm, and expiry, then attaches `req.user = { email, role, studentId }`.
-3. Role middleware (`requireStaff`, `requireAdmin`, `requireOwnershipOrAdmin`) narrows access before any database query. Student list queries branch: staff call `getAllStudents(dataset)` which queries `Student.find({ sourceDataset: dataset })` when a dataset filter is present, while students call `getStudentById(studentId, dataset)` and receive a zero-or-one-element array.
-4. `item.model.js` normalizes every raw `Student` document through `normaliseStudent`: numeric coercion of `CGPA` and `Kehadiran_Pct`, PLO coercion with zero fallback, certification scoring (`Tiada` 35, `CompTIA` 70, `Cisco CCNA` 85, `AWS Cloud` 90, fallback 50), dropout-risk derivation (attendance below 80 or CGPA below 2.0 forces `Tinggi`; `Bermasalah` forces `Tinggi` even with high CGPA; CGPA at least 3.5 or `Cemerlang` yields `Rendah`; otherwise `Sederhana` via the mapped value), and passthrough of certificates, profile image, personal fields, academic history, and `sourceDataset`.
-5. Skill-gap endpoints extend the normalized record with `buildMetrics` (nine `{ label: 'PLO N', value, target: 80 }` entries) and `buildInsight` (weakest PLO detection with a special `Nota: Penilaian untuk ... belum direkodkan` message when the minimum is zero, otherwise a gap and priority sentence referencing the lowercase risk label), then overwrite `dropoutRisk` with a live ML prediction from `getRealAIPrediction` when the ML service is reachable.
-6. Components store the normalized payload in `useState` (`students`, `skillGap`, `reports`, `items`, `mdbFiles`, `semesters`), derive display values with `useMemo` or inline computation (risk counts, PLO averages, gaps, filtered lists, chart datasets, employability scores), and render charts, tables, cards, and modals. Status transitions (accept, schedule, complete, delete, upload, process) trigger refetch functions (`fetchStudents`, `fetchReports`, `fetchSentReports`, `fetchMdbFiles`, `fetchData`) that replace the corresponding state slice.
-
-### Backend to Component: Write Path
-
-1. Student CRUD sends JSON (`POST /api/students`, `PUT /api/students/:studentId`, `DELETE /api/students/:id`) with `Content-Type: application/json`. Updates apply to all semester snapshots via `updateMany({ ID_Pelajar: id })`, wrapping non-operator bodies in `$set` with `runValidators: true`. Deletes remove all snapshots via `deleteMany({ ID_Pelajar: id })` plus bound `User` accounts via `deleteMany({ studentId: id, role: 'user' })`.
-2. Certificate and profile-image writes send `FormData` without an explicit content type (browser sets the multipart boundary) to `POST /api/students/:id/certificates` (fields `name`, `issuer`, `file`) and `POST /api/students/:id/profile-image` (field `file`). Multer validates PDF, JPG, JPEG, and PNG with a 5 MB limit, stores files under `uploads/certificates` with timestamped names, records `/uploads/certificates/<filename>` in `uploadedCertificates` or `profileImage` across all snapshots, and returns the created certificate or image path for optimistic local patching.
-3. Counseling referrals send `FormData` to `POST /api/reports` (fields `studentId`, `studentName`, `course`, `cgpa`, `attendance`, `riskLevel`, `interventionType`, `reason`, `priority`, `scheduledDate`, `counselorId`, optional `file`). The backend validates required fields, restricts `interventionType` to `kaunseling`, `klinik`, `softskills`, validates the date, resolves `counselorId` against a `User` with role `counselor`, normalizes priority to `urgent` or `normal`, and creates a `Report` with status `scheduled` plus an optional `/uploads/referrals/<filename>` attachment. State changes use `PATCH /api/reports/:id` with `{ action }` values `accepted`, `rejected`, `scheduled`, `completed`, `pending`, optionally plus `scheduledDate` and `counselorNotes`.
-4. Student reports send `FormData` to `POST /api/student-reports` (fields `studentId`, `studentName`, `course`, `cgpa`, `attendance`, `riskLevel`, `semester`, `title`, `message`, optional `ploScores` JSON string, computed `employability`, optional PDF `file`). The backend parses `ploScores` into `{ label, value }` pairs, clamps employability to 0-100, derives `reportType` (`full` when file plus message, `letter` when file only, `message` otherwise), enforces PDF-only attachments with a 5 MB limit under `uploads/reports`, and creates a `StudentReport` with `readByStudent: false`. Reads via `GET /api/student-reports/:id` flip the flag for the owning student. Deletes remove the disk file (with path-traversal guard confining deletions to the `uploads` root) and the document.
-5. MDB ingestion is a two-phase admin flow. Phase one (`POST /api/data/upload-mdb` with `FormData { file, datasetName }`) validates the dataset name, enforces the `.mdb` extension with a 100 MB limit, stores the file under `uploads/mdb`, and creates an `MdbFile` record with status `Saved`. Phase two (`POST /api/data/process-mdb/:id`) calls `executeEtlAndSync`: marks the record `Processing`, streams the file as a `Blob` in `FormData` to ML `POST /etl/process-mdb` with `X-API-Key`, maps each returned student to batch features, calls ML `POST /predict/batch` to fill `Status_Pelajar`, then bulk-upserts students with compound key `{ ID_Pelajar, sourceDataset: datasetName }` (preserving prior semesters) and bulk-upserts bound logins with `$setOnInsert` passwords (never overwriting existing credentials). Success marks the record `Processed` with `recordsProcessed` and `processedDate`; failure marks it `Failed` and throws. The frontend polls `GET /api/data/mdb-files` every 3 seconds while any record is `Processing`.
-6. AI chat sends JSON to `POST /api/ai/chat` with `{ studentId, userMessage, chatHistory }`. The backend validates presence and a 1500-character limit, enforces 15 requests per minute per staff email, loads the student with `getStudentById`, strips PII into `studentDataForAI`, prepends `TVET_KNOWLEDGE` grounding and an injection guard to the system prompt, sanitizes history (valid roles only, last 16 entries, strict user-model alternation starting with user, no trailing user message, truncated to 1500 characters), calls Gemini streaming SSE first (writing `candidates[0].content.parts[0].text` chunks as `text/plain` with no-cache headers), falls back to non-streaming JSON when streaming yields no chunks, and returns HTTP 500 with `Gagal mendapatkan respons daripada AI.` without leaking the API key on failure.
-
-### Global State versus Local State Handling
-
-- No global store exists. Cross-cutting concerns are handled by cookies (`user` for display, `ikmbToken` for authorization), URL query parameters (`student-profile?id`), and server-side proxy injection.
-- Each dashboard owns its domain slice: `StaffDashboardClient` owns semesters, datasets, students, AI chat, and MDB pipeline state; `StudentDashboardClient` owns semester, selected student, skill gap, and certificate draft state; `StudentProfileClient` owns the single skill-gap payload plus modal open flags; `CounselorDashboardClient` owns referral and sent-report lists plus modal and toast state; `MergedLaporanTab` owns the merged inbox plus filter and selection state; `AppointmentCalendar` owns only view state (`currentMonth`, `selectedDay`, `isMobile`) with all domain data passed as props.
-- Shared logic is extracted as functions and hooks rather than stores: `getClientUser`, `getRoleLabel`, `isStaff`, `calculateEmployability`, `calculateTopPerformerScore`, `formatMsDate`, `getRiskMeta`, `useFilePreview`, `formatFileSize`, `normalizeLaporanItems`, `formatLaporanDate`. Modal visibility is always a local boolean plus an `onClose` callback; form drafts are always local `useState` objects updated by a single `handleInputChange` keyed on input `name`.
-- Navigation state (`activeTab`, `isSidebarOpen`) lives in each dashboard client and is passed down to `Sidebar`. No tab state persists across routes; switching dashboards resets to the default tab (`overview` for staff, `dashboard` for students, `calendar` for the embedded counselor view, `all` for the embedded inbox).
-
-### Caching, Local Storage, Session Persistence Patterns
-
-- HTTP caching: all dynamic pages use `force-dynamic`, so Next.js never statically caches dashboard HTML. Chart.js and component state are in-memory only and refetch on dataset change, tab-relevant polling, or explicit refresh buttons. No `localStorage`, `sessionStorage`, or IndexedDB usage exists anywhere in `src`.
-- Cookie persistence: `user` and `ikmbToken` both use `maxAge: 86400` (24 hours). `ikmbToken` is `httpOnly: true`, `secure` in production, `sameSite: lax`, `path: /`. `user` is readable (`httpOnly: false`) with `secure` in production and `path: /`. Logout deletes both cookies. JWT itself expires after 8 hours, so sessions longer than 8 hours but shorter than 24 hours retain cookies that the Edge and backend reject, producing redirects to `/` or HTTP 401 responses that the UI handles by navigating to `/`.
-- File preview lifecycle: `useFilePreview` creates `URL.createObjectURL(file)` in a `useEffect` keyed on `file` and revokes it in the effect cleanup, so previews never leak object URLs and never persist beyond the modal session.
-- Backend recovery: on successful Mongo connection the server resets any `MdbFile` records stuck in `Processing` to `Saved`, so crashed ETL jobs do not block the UI permanently. The frontend complements this with 3-second polling while processing flags are present.
-- Database as the source of truth: semester snapshots are keyed by `{ ID_Pelajar, sourceDataset }`, so switching the semester selector re-queries rather than filtering cached rows. Certificates, profile images, referrals, and student reports are read fresh on each mount or refresh. The `dist/` directory contains a stale Vite build (`index.html`, `index-C4sBUKSD.css`, `index-DyfLGFLv.js`) that is not referenced by the Next.js application and should not be treated as a cache layer.
+**Project:** TVETMARA Besut – Skills & Talent Development Dashboard (Sistem Papan Pemuka Pintar IKMB)
+**Repo root:** `TVETMARA-Besut-Skills-Talent-Development-Dashboard`
+**Architecture style:** Three independently-deployed services (Next.js SSR frontend, Express REST backend, FastAPI ML microservice) + one shared MongoDB, wired together over a private Docker/Podman bridge network (`tvet_net`).
 
 ---
 
-Last Updated: 2026-10-06 19:05:00 UTC+8
+## 1. System Overview & Tech Stack
+
+### 1.1 Core Framework & Runtime
+
+| Layer | Technology | Exact Version (from lockfile/manifest) | Notes |
+| :--- | :--- | :--- | :--- |
+| Frontend framework | **Next.js (App Router)** | `15.1.6` (pinned in root `package.json`) | SSR everywhere: every route page exports `dynamic = 'force-dynamic'`; build output is `standalone` for the Docker runner stage |
+| UI runtime | **React / React DOM** | `^19.0.0` | React Server Components for pages, Client Components for all interactive dashboards; `useActionState` + `useFormStatus` for Server-Action forms |
+| Language | **JavaScript (ESM)** | `"type": "module"` (both root and `backend/`) | Path alias `@/* → ./src/*` (`jsconfig.json`, mirrored in `vitest.config.js`). No TypeScript. |
+| Backend framework | **Express** | `^5.2.1` (`backend/package.json`) | Entry `backend/server.js`; routers mounted at `/api/auth`, `/api/reports`, `/api/student-reports`, and `/api` (items/data/ML/`/ai/chat`) |
+| ODM / Database | **Mongoose** | `^9.3.3` against **MongoDB** (`mongo:latest` container) | Database name `ikmb-dashboard`; WiredTiger datadir lives in `./mongodb_data` (host bind mount) |
+| ML service | **FastAPI + Uvicorn** | Python `3.9-slim` container; `requirements.txt`: fastapi, uvicorn, scikit-learn, joblib, pydantic, pandas, numpy, httpx, pytest, pytest-asyncio, python-multipart | Entry `ML/ml.py`; model artefact `model_ai_risiko_lengkap_v4.pkl` (RandomForest, trained by `ML/train_and_evaluate_v4.py` on 3-semester real data with `GroupShuffleSplit` anti-leakage) |
+| MDB extraction | **mdbtools** (`mdb-tables`, `mdb-export`) | installed in ML container image | Called via `subprocess.run` with 15–30 s hard timeouts |
+
+### 1.2 State Management & Data Fetching Strategy
+
+- **No external state library** (no Redux/Zustand/React Query). All state is:
+  - **Local React state** (`useState`/`useEffect`) inside each `*DashboardClient` component;
+  - **URL search params** as the persistence layer for cross-navigation context (`?tab=`, `?dataset=`, `?id=`, `?from=`) — written with `router.replace(..., { scroll:false })` and read back on mount, so refresh and browser Back/Forward restore the exact dashboard view;
+  - **Cookies** for identity/session (see §5).
+- **Data fetching:** plain `fetch()` to same-origin `/api/*`. The Next.js catch-all proxy (`src/app/api/[...proxy]/route.js`) **injects the HttpOnly JWT** into the `Authorization: Bearer …` header server-side, so client code never touches the token (`getClientToken()` returns the literal string `"proxy-handled"`).
+- **Direct-to-browser file streams:** dashboard uploads use `FormData` + `fetch` (certificates, profile images, referral attachments, `.mdb` archives). AI chat consumes a **plain-text SSE-ish stream** (`res.body.getReader()`) typed character-by-character.
+- **Polling:** while any `.mdb` ETL job reports `status: "Processing"`, the admin client polls `GET /api/data/mdb-files` every **3000 ms** (`StaffDashboardClient.jsx:214-218`).
+- **Caching:** none by design (no SWR/memory cache); every tab mount refetches. Open handles (`URL.createObjectURL`) in `use-file-preview.js` are revoked on unmount.
+
+### 1.3 Styling & UI Layer
+
+| Concern | Implementation |
+| :--- | :--- |
+| Utility CSS | **Tailwind CSS `^3.4.19`** + **autoprefixer `^10.4.27`** via PostCSS. Content globs: `src/app/**`, `src/components/**`. |
+| Custom brand palette | Extended slate/navy set used inline: `#0A1628` (ink), `#1251AA` (primary blue), `#0C2461` (deep navy header), `#5A6A85` (muted), `#EEF3FB` (page bg). Semantic Tailwind colors (blue-600, emerald, amber, rose) elsewhere. |
+| Typography | **Plus Jakarta Sans** (Google font via `next/font`, weights 400/500/600/700, `display: 'swap'`, `font-sans`). |
+| Icons | **Phosphor Icons web** loaded globally from `https://unpkg.com/@phosphor-icons/web` (strategy `beforeInteractive` in `layout.jsx`); CSP on the backend allows `script-src https://unpkg.com`. |
+| Charts | **Chart.js `^4.5.1` + `react-chartjs-2 ^5.3.1`**. Registered controllers per page: `Bar` (institutional PLO averages, GPA/attendance trend combo), `Radar` (PLO skill gap), with `animation: { duration: 800, easing: 'easeOutQuart' }`. |
+| Motion system | Hand-written CSS `@keyframes` in `src/app/globals.css` consumed through Tailwind arbitrary values — e.g. `animate-[slideUp_0.4s_ease-out]`, `animate-[floatSoft_3s_ease-in-out_infinite]`. **No Framer Motion / GSAP.** See full inventory in §4 intro. |
+| Responsive/mobile | `touch-target` (44 px min), `text-responsive-*` via `clamp()`, `safe-area-top/bottom`, `pb-safe`, `no-select`, `scroll-smooth-mobile`; sidebar/backdrop/sheet patterns for < 768 px and < 1024 px breakpoints. |
+| Testing UI | Vitest `^4.1.10` + jsdom + Testing Library (`@testing-library/react ^16`, `jest-dom ^6`, `user-event ^14`). |
+
+### 1.4 Third-Party Services / External Integrations
+
+| Service | Endpoint | Purpose | Auth mechanism |
+| :--- | :--- | :--- | :--- |
+| **Google Gemini (LLM)** | `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse` (primary), `:generateContent` (fallback) | Staff-facing student-advisor chatbot ("Pembantu Pintar TVETMARA"), grounded with an internal TVET knowledge base; system-prompt injection defence around `<DATA_PELAJAR>` block | Raw REST via `fetch` with `x-goog-api-key` header (chosen deliberately — the official SDK cannot send this header required by `AQ…`-format keys). Key = `GEMINI_API_KEY` (backend only). |
+| **ML microservice (internal)** | `ML_API_URL` (`http://ml-api:8000` in compose; `127.0.0.1:8000` default) | `/predict/risk`, `/predict/batch`, `/etl/process-mdb` | Shared secret header `X-API-Key` = `ML_API_SECRET`; service fail-closed boots (exits) without it |
+| **MongoDB** | `MONGO_URI` | Primary datastore (users, students, referrals, student reports, MDB ledger) | Connection string |
+| **Unsplash CDN** | `images.unsplash.com` | Decorative login background (CSP `img-src` allowlisted) | public |
+| **Google Fonts / unpkg** | fonts.googleapis.com, fonts.gstatic.com, unpkg.com | Font + Phosphor icon assets | public (CSP allowlisted) |
+| **No SMTP/email provider exists.** | — | Password recovery is done through identity-proof questions + scoped single-use tokens delivered in the verified browser session; admin reset outputs a one-time temp password in the API response | — |
+
+---
+
+## 2. Directory Tree & Module Manifest
+
+### 2.1 Tree
+
+```
+.
+├── package.json                  # Frontend manifest (Next.js) + scripts dev/build/start/lint/test
+├── middleware.js                 # Next.js EDGE middleware (route guard, JWT verify via jose)
+├── next.config.mjs               # output:"standalone"; rewrites /uploads/* → backend:5000
+├── tailwind.config.js / postcss.config.js
+├── vitest.config.js              # jsdom env, globals, @ → ./src alias
+├── jsconfig.json / .eslintrc.json
+├── compose.yml                   # 4-service stack: mongodb, backend, ml-api, frontend
+├── Containerfile.frontend        # node:20-alpine 3-stage standalone build
+├── diagnostics.js                # mongosh inspection shell script (counts, dupes, ledger)
+├── .env / .env.local             # root envs: JWT_*, GEMINI_API_KEY (frontend), ML secret
+├── src/
+│   ├── app/
+│   │   ├── layout.jsx            # <html lang="ms">, font, Phosphor <Script>, globals.css
+│   │   ├── globals.css           # @keyframes + motion utility layer (see §4)
+│   │   ├── page.jsx              # /           → LoginForm (login)
+│   │   ├── change-password/page.jsx  # /change-password → ChangePasswordForm
+│   │   ├── staff-dashboard/page.jsx  # /staff-dashboard → StaffDashboardClient
+│   │   ├── student-dashboard/page.jsx # /student-dashboard → StudentDashboardClient
+│   │   ├── student-profile/page.jsx  # /student-profile?id&dataset&from → StudentProfileClient
+│   │   ├── actions.js            # 'use server': loginAction, logoutAction, changePasswordAction
+│   │   └── api/[...proxy]/route.js   # GET/POST/PUT/PATCH/DELETE proxy → BACKEND_URL/api/*
+│   ├── components/
+│   │   ├── auth/  LoginForm.jsx · ChangePasswordForm.jsx · ForgotPasswordModal.jsx
+│   │   ├── dashboard/  StaffDashboardClient.jsx (1475 L) · StudentDashboardClient.jsx (1029 L)
+│   │   │      StudentProfileClient.jsx · CounselorDashboardClient.jsx · MergedLaporanTab.jsx
+│   │   │      AppointmentCalendar.jsx
+│   │   ├── ui/    dashboard-kit.jsx · AttachmentPreview.jsx
+│   │   ├── Sidebar.jsx · KpiCard.jsx · StudentListGrid.jsx · StudentModal.jsx
+│   │   ├── JobCard.jsx · ReportFormModal.jsx · GenerateReportModal.jsx · StudentDetailModal.jsx
+│   │   └── (GenerateReportModal preceded by StudentDetailModal owner: student inbox)
+│   ├── lib/
+│   │   ├── auth.js               # server helpers: getStoredUser, getToken, getDashboardPathForRole
+│   │   ├── client-auth.js        # getClientUser (reads 'user' cookie), getClientToken (stub)
+│   │   ├── roles.js              # ROLES map + getRoleLabel + isStaff
+│   │   ├── heuristics.js         # calculateEmployability, calculateTopPerformerScore
+│   │   └── use-file-preview.js   # useFilePreview hook (size/type validation, object URLs)
+│   ├── assets/react.svg
+│   └── __tests__/Login.test.jsx  # Vitest smoke test of login page
+├── backend/
+│   ├── server.js                 # Express bootstrap: helmet+CSP, CORS allowlist, swagger, mount
+│   ├── auth.js                   # /api/auth router (login, change/reset/forgot flows, limiters)
+│   ├── auth.model.js             # signTokenForUser, authenticateUser, lockout, recovery tokens
+│   ├── items.js                  # /api router #1: students CRUD, certificates, MDB pipeline, /ai/chat
+│   ├── item.model.js             # normaliseStudent, dataset resolution, skill-gap, ML prediction client
+│   ├── reports.js                # /api/reports router (counselor referrals; multer; state machine)
+│   ├── studentReports.js         # /api/student-reports router (reports/letters to student inbox)
+│   ├── middleware/authMiddleware.js # verifyToken, requireAdmin, requireStaff, requireOwnershipOrAdmin
+│   ├── models/  User.js · Student.js · Report.js · StudentReport.js · MdbFile.js
+│   ├── seed.js                   # bootstrap students (db/data_tvet_muktamad.json) + demo accounts
+│   ├── seed-admin.js             # only demo admin/counselor/user accounts
+│   ├── repredict-status.js       # offline batch re-prediction script (chunks of 500)
+│   ├── sync-student-assets.js    # heals profileImage/certificates across semester snapshots
+│   ├── diagnostics (diag) · babel.config.json · Containerfile.backend · .env/.env.example
+│   ├── db/  data_tvet_muktamad.json · mdb_extracted/{JD2025,JJ2025,JJ2026}/(CSV dumps)
+│   │       prepare_ml_data_3mdb.py · relabel_option2.py · sedut_mdb_tulen.py · inspect_mdb_linux.py
+│   ├── uploads/  mdb/ · certificates/ · (referrals/, reports/ created at boot)
+│   └── __tests__/ auth.test.js · items.test.js   # Jest + Supertest
+├── ML/
+│   ├── ml.py                     # FastAPI app: /predict/risk, /predict/batch, /etl/process-mdb
+│   ├── model_ai_risiko_lengkap_v4.pkl  # active RandomForest artefact (v3 kept for rollback)
+│   ├── train_and_evaluate_v4.py  # trainer: GroupShuffleSplit, GridSearchCV RandomForest
+│   ├── train_and_evaluate.py     # legacy v3 trainer
+│   ├── test_ml.py · requirements.txt · Containerfile
+├── .github/workflows/ci.yml      # 3 test jobs (Vitest/Jest/pytest) + docker build gate
+├── public/  logo-tvetmara.jpg · vite.svg
+└── dist/    # stale legacy Vite build artefacts (not part of the Next.js runtime)
+```
+
+### 2.2 Module Manifest
+
+| Path / Module | Purpose | Key Exports / Responsibilities |
+| :--- | :--- | :--- |
+| `middleware.js` | Next.js Edge route guard. Verifies the HttpOnly `ikmbToken` JWT with `jose.jwtVerify` (HS256, issuer `tvetmara-backend`, audience `tvetmara-dashboard`). Redirects: anon → `/`; authenticated off a login page → role dashboard (or `/change-password` if `mcp` claim); `mcp` users out of any other page → `/change-password`; students off `/staff-dashboard|/student-profile` → `/student-dashboard`; staff off `/student-dashboard` → `/staff-dashboard`. Matcher `['/((!api\|_next/static\|_next/image\|favicon.ico\|assets).*)']` excludes the API proxy. | `middleware(request)`, `config` |
+| `src/app/actions.js` | `'use server'` form actions. `loginAction` posts to `${BACKEND_URL}/api/auth/login`, then sets **two cookies**: `user` (readable JSON profile, 24 h) + `ikmbToken` (HttpOnly, SameSite=Lax, secure in prod, 24 h). Redirects by `mustChangePassword` / role. `logoutAction` deletes both cookies → `/`. `changePasswordAction` calls `/api/auth/change-password` with the bearer token, re-rotates both cookies, redirects to the role dashboard. | `loginAction(prevState, formData)`, `logoutAction()`, `changePasswordAction(prevState, formData)` |
+| `src/app/api/[...proxy]/route.js` | Universal API proxy. Rebuilds upstream URL `${BACKEND_URL}/api/${path}${search}`, strips hop-by-hop headers, injects `Authorization: Bearer <ikmbToken cookie>`, streams the backend response body back verbatim (also enables the AI chat stream through the proxy). | `proxyRequest` exported as GET/POST/PUT/PATCH/DELETE |
+| `src/lib/auth.js` | Server-side cookie readers used by RSCs. | `getStoredUser()`, `getToken()`, `getDashboardPathForRole(role)` |
+| `src/lib/client-auth.js` | Client-side identity. Parses the JS-readable `user` cookie. | `getClientUser()`, `getClientToken()` (returns `"proxy-handled"` placeholder) |
+| `src/lib/roles.js` | Single source of truth for role labels/grouping. Roles: `admin` → label **Penyelaras** (staff), `counselor` → **Kaunselor** (staff), `user` → **Pelajar** (student). | `ROLES`, `getRoleLabel()`, `isStaff()` |
+| `src/lib/heuristics.js` | Pure scoring math: employability = `(CGPA/4)*40 + attendance*0.6`, capped at 100; top-performer score = `(CGPA/4)*60 + attendance*0.4`. | `calculateEmployability`, `calculateTopPerformerScore` |
+| `src/lib/use-file-preview.js` | Hook validating attachments client-side (≤ 5 MB, extension/mime allowlist from `acceptTypes`), generating revocable object URLs for previews. | `useFilePreview({acceptTypes, maxBytes})`, `formatFileSize`, `MAX_ATTACHMENT_BYTES` |
+| `src/components/Sidebar.jsx` | Collapsible left navigation shell shared by both dashboards: logo, nav buttons (active = blue left-border), user card with avatar/initials + logout; Escape-to-close, body-scroll lock, mobile slide (`translate-x` transform transition, duration 300). | default `Sidebar` |
+| `src/components/KpiCard.jsx` | Statistic card with skeleton-shimmer loading, icon chip, and animated progress bar (width transition `duration-700 ease-out`). | default `KpiCard` |
+| `src/components/StudentListGrid.jsx` | Admin student browser: search (nama/ID), course filter chips (ITW/DFK/DGA/SLR/DCG/SED/PPU), risk filter chips with live counts, responsive card grid with staggered entrance, nav to profile cards. | default `StudentListGrid` |
+| `src/components/StudentModal.jsx` | Full-screen/centered create-or-edit student form (ID locked when editing). Validates nothing itself — defers to backend. Escape close + backdrop click + scroll lock. | default `StudentModal` |
+| `src/components/JobCard.jsx` | Career card in student career tab (icon, match %, "Mohon Sekarang" button with icon-invert hover). | default `JobCard` |
+| `src/components/ReportFormModal.jsx` | Staff **referral** composer: fetches `GET /api/auth/users` to list counselors, defaults datetime to tomorrow 09:00, priority toggle (normal/segera), reason textarea, optional PDF/JPG/PNG attachment w/ live preview; submits `multipart/form-data` → `POST /api/reports`. | default `ReportFormModal` |
+| `src/components/GenerateReportModal.jsx` | Staff **student report/letter** composer: prefilled title, message body, optional **PDF-only** attachment; computes `employability` and serialises `ploScores` JSON from `skillGap.chart`; submits → `POST /api/student-reports`. Uses an open-transition ref to reset state exactly once per open. | default `GenerateReportModal` |
+| `src/components/StudentDetailModal.jsx` | Read-only detail viewer for a merged laporan item (appointment or report); shows grid of student facts, referral reason/counselor notes or report message, inline `<iframe>` PDF preview, download/print buttons. | default `StudentDetailModal` |
+| `src/components/ui/dashboard-kit.jsx` | Shared design atoms: `formatMsDate` (ms-MY locale), toned `Badge`, `StatCard`, `SectionCard`, `PillTabs` (scrollable pill tab row with count pills), `EmptyState`, `SkeletonList`, and the risk classifier `getRiskMeta`/`RiskBadge` (Tinggi/Sederhana/Rendah colour map). | named exports (listed left) |
+| `src/components/ui/AttachmentPreview.jsx` | Attachment chip + inline image `<img>` or PDF `<iframe>` preview using the hook's object URL. | default `AttachmentPreview` |
+| `src/components/dashboard/StaffDashboardClient.jsx` | The **Penyelaras/Admin + Kaunselor** shell. Loads semester ledger (`GET /api/semesters`), pins `?tab=&dataset=` into the URL, derives KPIs/PLO averages/skills-gap tables/pathway recommendations, hosts the AI chat, admin student CRUD modal, and mounts `CounselorDashboardClient` for the counselor tab. Admin sees the extra `data` (MDB management) tab. | default `StaffDashboardClient` (1475 lines) |
+| `src/components/dashboard/CounselorDashboardClient.jsx` | Referral lifecycle manager: PillTabs (`calendar/pending/scheduled/completed/sent-reports/all`), `AppointmentCalendar`, accept/reject/schedule/complete/reset actions via `PATCH /api/reports/:id`, toast system (3 s auto-dismiss), schedule + complete modals, "Dihantar" list backed by `GET /api/student-reports` with delete. | default `CounselorDashboardClient` |
+| `src/components/dashboard/StudentDashboardClient.jsx` | The **Pelajar** shell (5 tabs). Loads own-restricted student list, `GET /api/students/:id/skill-gap` radar, career mapping (per-course static dictionary of job cards), certificate upload/manage, and laporan inbox. Profile-image upload syncs into both `skillGap.student` and the `students` array. | default `StudentDashboardClient` (1029 lines) |
+| `src/components/dashboard/MergedLaporanTab.jsx` | Student inbox merging `GET /api/student-reports` (letters/reports) + `GET /api/reports/mine` (appointments) via `normalizeLaporanItems`; unread ring/highlight + count badge; opens `StudentDetailModal` and marks reports read lazily (`GET /api/student-reports/:id`). | default + `formatLaporanDate`, `normalizeLaporanItems` |
+| `src/components/dashboard/StudentProfileClient.jsx` | Staff deep-profile view per student snapshot: sticky identity card (risk badge, dataset badge, action buttons incl. `window.print()` + JSON export), tab bar (`personal/academic/skills`), dual-axis GPA/attendance combo chart, PLO radar, employability card, and 3 intervention referral cards (staff-only). Wires `ReportFormModal` + `GenerateReportModal`. "Back" restores `?tab=&dataset=` of the originating staff view. | default `StudentProfileClient` |
+| `src/components/dashboard/AppointmentCalendar.jsx` | Month grid calendar (Monday-first, Malay day/month names) for scheduled/accepted referrals: day cells show up to 2 event chips (mobile: dots), urgent flags, today/selected highlight; desktop side panel with selected-day details + upcoming list; mobile fixed bottom-sheet. | default `AppointmentCalendar` |
+| `backend/server.js` | Express app: helmet with explicit CSP (allowlists unpkg Phosphor script, Google fonts/styles, Unsplash images, `connectSrc 'self'`), CORS allowlist from `CORS_ORIGIN` with `credentials: true` (no-origin requests allowed for server-to-server), JSON body limit **200 KB**, creates+static-serves `uploads/{certificates,referrals,reports}`, Swagger UI at **`/api/docs`** (OpenAPI 3 from JSDoc comments), Mongo connect + recovery (stuck `MdbFile` "Processing" → "Saved"), `/api/health`, global error handler (prod hides stack traces), fail-closed if `JWT_SECRET` missing outside tests. | default `app` |
+| `backend/middleware/authMiddleware.js` | **verifyToken**: Bearer-only, pins HS256 + issuer/audience, rejects `scope: "password-reset"` tokens, performs an **authoritative DB lookup** (`User.mustChangePassword`, `passwordChangedAt`), kills sessions issued before the last password change (`pwdAt` claim comparison), and gates flagged accounts to a `PASSWORD_CHANGE_WHITELIST` (login, change-password) with `403 code: PASSWORD_CHANGE_REQUIRED`. **requireAdmin / requireStaff / requireOwnershipOrAdmin** role/owner guards. | named exports as listed |
+| `backend/auth.js` + `backend/auth.model.js` | Identity domain. Lockout: 5 failed bcrypt checks → `lockUntil` now+15 min, error HTTP **423**. JWT claims: `{email, role, studentId, mcp, pwdAt}`, 8 h expiry. Policy: min 8 chars + letters+digits. Admin reset: 12-char `crypto.randomBytes(9).base64url` temp password → `mustChangePassword=true`. Recovery: Step 1 `verifyStudentIdentity(ID_Pelajar + No_KP digits)` → Step 2 scoped token (`aud: tvetmara-password-reset`, 15 m, single-use because `pwdAt` binding dies on success). Rate limit 8 requests/15 min keyed on resetToken/id. | `signTokenForUser`, `authenticateUser`, `changeOwnPassword`, `adminResetPassword`, `verifyStudentIdentity`, `createPasswordResetToken`, `resetPasswordWithToken`, `validatePasswordPolicy` |
+| `backend/items.js` | Student/data/ML/AI router (mounted at `/api`). Includes the **ETL orchestrator** `executeEtlAndSync` (MDB → ML service → AI batch predict → MongoDB bulk upserts), Gemlin chat endpoint with SSE passthrough, and all student CRUD/certificate/profile-image endpoints. | default router (`items.js:912`) |
+| `backend/item.model.js` | Normalisation + dataset resolution layer. `getLatestDataset()` prefers the admin-flagged `isCurrentSemester` then latest `processedDate` (returns `[]`/`null` rather than mixing datasets). `normaliseStudent()` maps raw MDB schema (Malay keys) → camelCase API shape and computes refined `dropoutRisk`: **hard rules win** — `attendance < 80 \|\| cgpa < 2.0` ⇒ "Tinggi"; `Bermasalah` ⇒ "Tinggi"; `cgpa >= 3.5 \|\| Cemerlang` ⇒ "Rendah"; else "Sederhana"; `Pending AI` ⇒ "Pending". Certification score map: Tiada 35 / CompTIA 70 / Cisco CCNA 85 / AWS Cloud 90. `getRealAIPrediction` calls ML `/predict/risk` and falls back to rules on failure. | `getAllStudents`, `getStudentById`, `getStudentSkillGapById`, `getRealAIPrediction`, `createStudent`, `updateStudent`, `deleteStudent` |
+| `backend/reports.js` | Counselor referral router: multer upload (≤ 5 MB, jpeg/jpg/png/pdf) to `uploads/referrals`, field validation, intervention enum (`kaunseling/klinik/softskills`), counselor existence check, `safeUnlink` cleanup on any error path; GET list with counselor scoping (`pending ∨ assigned`); GET/:id with ownership check; **PATCH state machine** — `accept | reject | reset(pending) | complete | schedule` + optional `counselorNotes`; counselors may only mutate their own or pending docs. | default router |
+| `backend/studentReports.js` | Student-report router: PDF-only multer (≤ 5 MB) to `uploads/reports`; `reportType` derived (`message | letter | full`); GET list scoped by role (student → addressed to them, counselor → authored, admin → all); GET/:id with owner/author/admin check and `readByStudent` side effect; DELETE with author/admin check + path-traversal-guarded file removal. | default router |
+| `backend/models/User.js` | Credential model: unique email, bcrypt hash, `role ∈ {admin, counselor, user}`, `studentId` (null for staff), password-lifecycle fields `mustChangePassword`, `passwordChangedAt`, `lastLoginAt`, `loginAttempts`, `lockUntil`. | default `User` |
+| `backend/models/Student.js` | Academic snapshot: Malay-key fields (`ID_Pelajar`, `Nama`, `Kursus`, `Semester`, `Kehadiran_Pct`, `CGPA`, `Sijil_Profesional`, `PLO_1…PLO_9`, `Status_Pelajar`, `No_KP`, `No_Telefon`, `Alamat`), embedded `academicHistory[]`, embedded `uploadedCertificates[]`, `sourceDataset` (indexed), `profileImage`. **One document per (student, semester dataset).** | default `Student` |
+| `backend/models/Report.js` | Counselor referral: student snapshot fields + `interventionType` enum, `reason`, `priority ∈ {urgent, normal}`, `status ∈ {pending, accepted, scheduled, completed, rejected}`, `adminEmail`, `counselorId`, `counselorNotes`, `scheduledDate`, attachment fields, timestamps. | default `Report` |
+| `backend/models/StudentReport.js` | Student inbox item: snapshot fields + `ploScores[{label,value}]`, `employability`, authorship (`authorEmail/Role/Name`), `title`, `message`, attachment, `reportType ∈ {message, letter, full}`, `readByStudent`, timestamps. | default `StudentReport` |
+| `backend/models/MdbFile.js` | ETL ledger: `datasetName` (admin label), `originalName`, `filePath`, `fileSize`, `status ∈ {Saved, Processing, Processed, Failed}`, `recordsProcessed`, `uploadDate`, `processedDate`, `isCurrentSemester`. | default `MdbFile` |
+| `backend/seed.js` / `seed-admin.js` | Upsert seeding: `db/data_tvet_muktamad.json` students + per-student Users (`<ID>@student.ikmb.edu.my`, `password123`, flagged `mustChangePassword` only on insert) + demo admin/counselor/user accounts. `seed-admin.js` only creates the three demo accounts. | run with `npm run seed` (backend) |
+| `backend/repredict-status.js` | Maintenance script: chunks every Student into ≤ 500-row batches, calls ML `/predict/batch`, writes `Status_Pelajar` back. | CLI script |
+| `backend/sync-student-assets.js` | Maintenance script: copies `profileImage` / `uploadedCertificates` from the newest snapshot into older ones (asset healing). | CLI script |
+| `ML/ml.py` | FastAPI service. Fail-closed `ML_API_SECRET`. Endpoints `POST /predict/risk`, `POST /predict/batch` (both build engineered features `PLO_Avg`, `PLO_Variance`, reindex to `risk_model.feature_names_in_`), `POST /etl/process-mdb` (accepts the raw `.mdb`, 100 MB cap, temp file, `mdbtools` extraction of tables `GPA`, `Pelajar`, `Daftar_Subjek`, `Detail_Result`, `Anugerah`, `Pelajar_Koko_Detail`; per-semester attendance matching into `academicHistory`; auto-excludes subjects whose `Kod_Ujian` references LO > 9, i.e. internal CLO schemes; concurrency-safe subprocess timeouts). Generic error messages (no str(e) leakage). | `app` (uvicorn target) |
+| `ML/train_and_evaluate_v4.py` | Trains `model_ai_risiko_lengkap_v4.pkl` from `backend/db/ml_training_data_real.csv`: feature engineering (PLO avg/variance), label `Status_Pelajar`, **GroupShuffleSplit** by `No_Pelajar` to stop cross-semester leakage, GridSearchCV RandomForest, prints classification report. | CLI script |
+| `.github/workflows/ci.yml` | CI: frontend job (Vitest + `next build` with dummy JWT env), backend job (Jest+Supertest with dummy JWT/ML env), ML job (pytest 3.9 + mdbtools), then `docker-build` job building all three Containerfiles. | — |
+| `compose.yml` | Local/dev deployment: `mongodb` (mongo:latest, volume `./mongodb_data`), `backend` (port 5000, `sleep 5` then start, uploads bind-mount), `ml-api` (port 8000), `frontend` (host **8080 → container 3000**, passes JWT vars for the Edge middleware), all on `tvet_net`. | — |
+
+---
+
+## 3. Role-Based Access Control (RBAC) & Permissions
+
+### 3.1 Role Definitions
+
+| Role token | populace label | Intended purpose |
+| :--- | :--- | :--- |
+| `admin` | **Penyelaras** | Institution coordinator. Full CRUD on student records, MDB/semester data management (upload, process, set current semester, delete), all referral reports, all student reports, admin password resets, AI chat. |
+| `counselor` | **Kaunselor** | Intervention owner. Sees pending (unclaimed) referrals + referrals assigned to them; runs the accept → schedule → complete lifecycle; authors student reports/letters; can delete only their own student reports. |
+| `user` | **Pelajar** | Student. Bound to exactly one `studentId` in the JWT (`studentId` claim). Read-only view of their own profile, rank/predictions; can upload/delete their own certificates and profile image (when `studentId` set); reads their inbox (reports + appointments); forced first-login password change via the `mcp` claim. |
+| *(anonymous)* | — | Only the login page and the forgot-password modal flow. |
+
+### 3.2 Permission Matrix
+
+Legend: ✅ allowed · ❌ denied · ◐ allowed with scope restriction (ownership/filter applied server-side).
+
+| Resource / Route / Action | Admin (`admin`) | Counselor (`counselor`) | Student (`user`) | Anonymous |
+| :--- | :---: | :---: | :---: | :---: |
+| `POST /api/auth/login` | ✅ | ✅ | ✅ | ✅ |
+| `POST /api/auth/forgot-password`, `/complete-password-reset` (identity proof for students) | ❌ (staff directed to admin instead) | ❌ | ✅ (with valid ID + No. KP) | ✅ (rate-limited, 8/15 min) |
+| `POST /api/auth/change-password` | ✅ | ✅ | ✅ (whitelisted even when flagged) | ❌ |
+| `POST /api/auth/reset-password` (issue temp password) | ✅ | ❌ | ❌ | ❌ |
+| `GET /api/auth/users` | ✅ | ✅ | ❌ | ❌ |
+| `GET /api/health`, `/api/docs` (Swagger) | ✅ | ✅ | ✅ | ✅ |
+| `GET /api/students` (list) | ✅ (all students of chosen dataset) | ✅ | ◐ (exactly one document: own `studentId` snapshot; empty array if unbound) | ❌ |
+| `POST /api/students` (create) | ✅ | ✅ | ❌ | ❌ |
+| `PUT /api/students/:studentId` | ✅ | ✅ | ❌ | ❌ |
+| `DELETE /api/students/:studentId` (also deletes child user accounts) | ✅ | ✅ | ❌ | ❌ |
+| `GET /api/students/:studentId` | ✅ | ❌ (requireOwnershipOrAdmin) | ◐ (only own `studentId` claim match) | ❌ |
+| `GET /api/students/:studentId/skill-gap` | ✅ | ❌ | ◐ (own only) | ❌ |
+| `POST /api/students/:studentId/certificates` (upload) | ✅ | ❌ | ◐ (own only) | ❌ |
+| `DELETE /api/students/:studentId/certificates/:certId` | ✅ | ❌ | ◐ (own only) | ❌ |
+| `POST /api/students/:studentId/profile-image` | ✅ | ❌ | ◐ (own only) | ❌ |
+| `POST /api/predict/manual` (AI what-if) | ✅ | ✅ | ❌ | ❌ |
+| `GET /data-mdb block → POST /api/data/upload-mdb` | ✅ | ❌ | ❌ | ❌ |
+| `GET /api/data/mdb-files` (ledger) | ✅ | ❌ | ❌ | ❌ |
+| `POST /api/data/process-mdb/:id` (trigger ETL + AI) | ✅ (409 if already Processing) | ❌ | ❌ | ❌ |
+| `PATCH /api/data/set-current-semester/:id` | ✅ | ❌ | ❌ | ❌ |
+| `DELETE /api/data/mdb-files/:id` | ✅ (blocked during Processing) | ❌ | ❌ | ❌ |
+| `GET /api/semesters` | ✅ | ✅ | ✅ | ❌ |
+| `POST /api/reports` (create referral) | ✅ | ✅ | ❌ | ❌ |
+| `GET /api/reports` | ✅ (all) | ◐ (`status=pending` ∨ `counselorId=me`) | ❌ | ❌ |
+| `GET /api/reports/mine` (upcoming appointments) | ❌ (effectively none: no studentId → `[]`) | ❌ | ✅ (status ∈ {accepted, scheduled}) | ❌ |
+| `GET /api/reports/:id` | ✅ | ◐ (own or pending) | ❌ | ❌ |
+| `PATCH /api/reports/:id` (state machine) | ✅ (any incl. reset→pending) | ◐ (own or pending only) | ❌ | ❌ |
+| `POST /api/student-reports` (report/letter to student) | ✅ | ✅ | ❌ | ❌ |
+| `GET /api/student-reports` | ✅ (all) | ◐ (authored by them) | ◐ (addressed to their studentId) | ❌ |
+| `GET /api/student-reports/:id` | ✅ | ◐ (author) | ◐ (owner, marks `readByStudent=true`) | ❌ |
+| `DELETE /api/student-reports/:id` | ✅ | ◐ (author only) | ❌ | ❌ |
+| `POST /api/ai/chat` (Gemini advisor) | ✅ (rate-limited 15/min per email) | ✅ (same limiter) | ❌ | ❌ |
+| Frontend `/staff-dashboard` | ✅ | ✅ | ❌ (redirected to `/student-dashboard`) | ❌ (→ `/`) |
+| Frontend `/student-profile` | ✅ | ❌ (middleware redirects to `/student-dashboard`) | ❌ | ❌ |
+| Frontend `/student-dashboard` | ❌ (redirected to `/staff-dashboard`) | ❌ (redirected to `/staff-dashboard`) | ✅ | ❌ |
+| Frontend `/change-password` | ✅ (+ forced when `mcp`) | ✅ (+ forced when `mcp`) | ✅ (+ forced when `mcp`) | ❌ (→ `/`) |
+
+### 3.3 Enforcement Mechanism
+
+Three concentric layers, all validating the **same JWT**:
+
+1. **Edge (`middleware.js`, every page route)** — `jose.jwtVerify` with pinned HS256 + issuer/audience; derives `isStaff = role ∈ {admin, counselor}`; applies the page-level redirects in the matrix above; enforces the `mcp` (must-change-password) gate as a UX layer. This middleware **never sees `/api/*`** (matcher exclusion).
+2. **Origin proxy (`src/app/api/[...proxy]/route.js`)** — the only path to the backend from the browser. Reads the HttpOnly `ikmbToken` cookie **server-side** and injects `Authorization: Bearer …`, so the raw token is never exposed to JS (XSS containment).
+3. **Backend (`backend/middleware/authMiddleware.js` on every route)** —
+   - `verifyToken`: verifies signature/claims again, **refuses scoped reset tokens** (`scope !== password-reset` check), then does a **live DB read** of the user: if `passwordChangedAt` moved past the token's `pwdAt` claim → the session is dead (401 "Sesi tamat"); if `mustChangePassword` and the route is not whitelisted → 403 `PASSWORD_CHANGE_REQUIRED` (this is the authoritative forced-change gate; every dashboard client also detects this code and `window.location.href = '/change-password'`).
+   - `requireAdmin`, `requireStaff` (admin ∨ counselor), `requireOwnershipOrAdmin` (staff ∨ `req.user.studentId === req.params.studentId`).
+   - Resource-level extra checks inside routers: counselor filter scoping on `GET /api/reports`, counselor mutation ownership on `PATCH /api/reports/:id`, author/owner logic in `studentReports.js`.
+4. **JWT claim anatomy:** `{ email, role, studentId (null for staff), mcp, pwdAt }` signed HS256, 8 h expiry, issuer `tvetmara-backend`, audience `tvetmara-dashboard`. Recovery tokens are a *third* token class with audience `tvetmara-password-reset` and `scope: password-reset` so they can never authenticate API calls.
+5. **Credential defence:** per-account lockout (5 fails → 15 min, HTTP 423), generic error strings to prevent enumeration, IP-less rate limiting (keyed on email / resetToken tail) to avoid IPv6 validation errors, strict request validation (types and lengths) on all sensitive input.
+
+---
+
+## 4. Page Breakdown, UI Behaviors & Animations
+
+### Motion system inventory (read this once — §4 references it)
+
+`src/app/globals.css` defines **7 keyframes** + utility layer used by every page:
+
+| Keyframe | Definition | Typical props |
+| :--- | :--- | :--- |
+| `fadeIn` | opacity 0→1, `translateY(6px)`→0 | `0.2–0.5s ease-out/ease-in-out` |
+| `slideInLeft` | `translateX(-32px)`→0 + fade | `0.4–0.6s ease-out` |
+| `slideInRight` | `translateX(32px)`→0 + fade | `0.4–0.6s ease-out` |
+| `slideUp` | `translateY(20px)`→0 + fade (cards, KPI, chat bubbles, rows) | `0.3–0.4s ease-out`, inline `animationDelay` stagger |
+| `scaleIn` | `scale(0.92)`→1 + fade (modals, badges, error boxes, avatars) | `0.2–0.3s ease-out` |
+| `floatSoft` | looped `translateY(0)→-8px→0` (decorative orbs, empty-state icons, chat avatar) | `3–8s ease-in-out infinite [delay]` |
+| `shimmer` | `background-position -200%→200%` (skeleton fill via `.skeleton-shimmer`, `1.5s ease-in-out infinite`) | — |
+
+Utility classes: `stagger-1…stagger-8` (50–400 ms delays), `anim-fill` (`animation-fill-mode: both` so pre-delay elements are invisible), `skeleton-shimmer`, `touch-target` (44 px), `text-responsive-sm|base|lg|xl|2xl` (`clamp()`), `no-select`, `scroll-smooth-mobile`, `safe-area-top/bottom`, `pb-safe`. Native Tailwind motion also used: `animate-spin` (spinner-gap icons), `animate-pulse` (streaming caret, "Memproses…" badges), `animate-bounce` with arbitrary `[animation-delay:0.2s/0.4s]` (typing dots). Chart.js runs its own JS animation (`duration: 800, easing 'easeOutQuart'`). Hover micro-interactions rely on Tailwind `transition-*` utilities (`hover:shadow-md`, `hover:-translate-y-1`, `hover:translate-x-1`, `active:scale-95`, `group-hover:opacity-100`). **All routing is client-conditional tab rendering (`{activeTab === 'x' && …}`), so a "page/tab transition" is the mount of the tab's root element carrying an entrance animation.**
+
+---
+
+### 4.1 Login (src/app/page.jsx → src/components/auth/LoginForm.jsx)
+
+- **Route:** `/` (also reachable as `/login` — middleware treats both as login surface)
+- **Access Level:** Public only. Authenticated visitors are bounced to `/change-password` (`mcp`) or their role dashboard by middleware.
+- **Primary Function & User Flow:**
+  1. Two-panel desktop layout: left = AI-themed brand panel (Unsplash background at opacity 40 + `mix-blend-overlay`, headline "Revolusi Bakat TVET dengan Kuasa AI", floating brain icon chip, two blurred gradient orbs); right = white form panel with IKMB logo, "Selamat Kembali" heading.
+  2. Dev-only demo-credential hint (`process.env.NODE_ENV !== 'production'`) pre-fills `admin@ikmb.edu.my` / `password123`.
+  3. Submit goes through `useActionState(loginAction)` — the **Server Action** fetches `/api/auth/login` on the server side, sets both cookies, and redirects (`mustChangePassword` → `/change-password`; staff → `/staff-dashboard`; else `/student-dashboard`). Failure returns `{ error }` rendered in a red inline alert box.
+  4. "Lupa kata laluan?" opens `ForgotPasswordModal` (student-only recovery; staff directed to contact the coordinator — modal footnote).
+- **Components Used:** `LoginForm`, `ForgotPasswordModal`, Server Actions (`loginAction`).
+- **Animations & Visual Transitions:**
+  - *Page entrance:* left panel `animate-[slideInLeft_0.6s_ease-out] anim-fill`; right panel `animate-[slideInRight_0.6s_ease-out] anim-fill`.
+  - *Staggered content:* headline `slideUp 0.5s ease-out 0.2s`, paragraph 0.35s, header block 0.15s, email field 0.25s, password field 0.35s, submit 0.45s — all `anim-fill`.
+  - *Idle ambient:* brain icon + both orbs `floatSoft` 3 s / 6 s / 8 s infinite (right orb delayed 1 s).
+  - *Pending spinner:* submit button swaps label to "Memproses..." with `ph-spinner-gap animate-spin` (via `useFormStatus().pending`); button transitions `hover:scale-[1.02] active:scale-[0.98]`, `duration-300`.
+  - *Error appearance:* `scaleIn 0.3s ease-out` pop-in of red alert.
+  - *Input focus:* `transition-all duration-200` ring (`focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500`).
+
+#### ForgotPasswordModal (src/components/auth/ForgotPasswordModal.jsx)
+- **Access Level:** Public (student identity-verified; 2-step wizard: Step 1 → `POST /api/auth/forgot-password` needs `idPelajar`+`noKP`; Step 2 → `POST /api/auth/complete-password-reset` consumes `resetToken`).
+- **User Flow:** identity check → scoped 15-min single-use token → new password + live policy checklist (≥8 chars; letters+digits) → confirm field turns red on mismatch → success closes and refocuses the login password field. On token errors the wizard resets to Step 1.
+- **Animations:** overlay `fadeIn 0.2s` + `bg-black/50 backdrop-blur-sm`; card `slideUp 0.3s`; key icon `floatSoft 3s infinite`; autofill `scaleIn` for error box; live-rule icons crossfade via `transition-colors duration-200`; buttons `active:scale-95`; Step 1→2 swap via per-form `fadeIn 0.3s`.
+
+---
+
+### 4.2 Change Password (src/app/change-password/page.jsx → src/components/auth/ChangePasswordForm.jsx)
+
+- **Route:** `/change-password`
+- **Access Level:** All authenticated roles. **Forced** here while JWT claim `mcp = true` (middleware + backend whitelist both enforce); also self-service entry point (stale-session escape hatch).
+- **Primary Function & User Flow:**
+  1. Card centered on `slate-50` with two decorative gradient orbs, lock icon, account email pill (from `getClientUser()`).
+  2. Live password meter (3 rules: ≥8 chars; letters AND numbers; symbol "disyorkan") refreshing as you type; confirm field gets red border + "Kata laluan tidak sepadan" on mismatch.
+  3. Submit = Server Action `changePasswordAction`: client-side confirm-match check → backend `POST /api/auth/change-password` (Bearer injected from cookie) → **both cookies rotated** with fresh token (`mcp` now false, `pwdAt` bumped so older sessions die) → redirect to role dashboard.
+- **Components Used:** `ChangePasswordForm`, `changePasswordAction`.
+- **Animations & Visual Transitions:** card `scaleIn 0.3s ease-out`; fields stagger `slideUp 0.4s` at 0.1/0.2/0.3/0.4/0.5 s with `anim-fill`; orbs `floatSoft` 6 s + 8 s (delayed); icon chip `floatSoft 3s infinite`; mismatch hint `fadeIn 0.2s`; pending spinner as in login; buttons `hover:scale-[1.02] active:scale-[0.98] duration-300`.
+
+---
+
+### 4.3 Staff Dashboard (src/app/staff-dashboard/page.jsx → StaffDashboardClient.jsx)
+
+- **Route:** `/staff-dashboard?tab=<overview|prediction|skills|pathways|management|counselor|data>&dataset=<name>` (both params continuously rewritten into the URL with `router.replace({scroll:false})` so refresh/back preserves state; `?dataset` is restored/deep-linked).
+- **Access Level:** Admin + Counselor (middleware). Counselor is scoped first-burger: tab `data` hidden, redirect forced to other tabs if reached.
+- **Primary Function & User Flow:**
+  1. On mount: read `user` cookie, load semester ledger `/api/semesters` (any `403 PASSWORD_CHANGE_REQUIRED` hard-redirects to `/change-password`), select active dataset: restored from URL → admin-flagged `isCurrentSemester` → latest processed. Admin additionally fetches MDB ledger.
+  2. Active dataset change refetches `/api/students?dataset=<name>` (scoped per dataset; never a mixed view).
+  3. **Tab `overview`:** 3 KPI cards (total students, average employability by `calculateEmployability`, high-risk count where `dropRatio Tinggi ∨ attendance < 80 ∨ cgpa < 2.0`), Chart.js `Bar` chart "Purata Pencapaian PLO vs Sasaran" (avg per PLO 1–9 vs 8× target series), "Pelajar Berisiko Tinggi" list (top 5, reason tag shows kehadiran/CGPA/AI) and "Top Performers" (top 5 by CGPA with `calculateTopPerformerScore`, award/cert caption). Rows are clickable → `/student-profile?id=<id>&dataset=<activeDataset>&from=overview`.
+  4. **Tab `prediction`:** AI advisor workspace, 3-column split. Left "Konteks Pelajar": searchable combobox (search + risk-category chips **Semua/Tinggi/Sederhana/Rendah** with counts), dropdown result rows (avatar/img, risk badge), clear button; context card (avatar, name, risk, kursus, CGPA, kehadiran, weakest PLO < 80 flagged "Fokus Pemantauan"); 3 quick prompts. Right: chat panel with welcome message, messages list, streaming answers. Sending posts `/api/ai/chat` `{studentId, userMessage, chatHistory, dataset}`; JSON fallback and SSE stream handled distinctly; token stream appends into the last message with caret. Outside-click + Escape close the combobox.
+  5. **Tab `skills`:** skills-gap table (per-PLO average, gap to 80, status chips Selamat / Perlu Peningkatan / Kritikal).
+  6. **Tab `pathways`:** recommendation cards for every PLO with a positive gap, sorted by gap desc, mapped to intervention course names ("Kursus Komunikasi Efektif", "Bengkel Pengaturcaraan", "Latihan OSH", …).
+  7. **Tab `management`:** `StudentListGrid` (search, course chips, risk chips; cards clickable → profile; "Tambah" opens `StudentModal`; card hover reveals nothing destructive — delete happens via modal edit path and `window.confirm` in `handleDelete`).
+  8. **Tab `counselor`:** renders `CounselorDashboardClient` (§4.4).
+  9. **Tab `data` (admin only):** MDB management — upload form (dataset name + `.mdb` ≤ 100 MB), archive table of files with status chips (Saved/Processing/Processed w/ record count + "Semasa" star badge/Failed), actions: process (with confirm + spinner), set current semester (star), delete (confirm; blocked while Processing). Live 3 s polling while any job is Processing; skeleton rows while ledger loads; success/error toast bar.
+  10. Edit flow: `openEditModal` reuses `StudentModal`; `handleSubmit` PUT/POST `/api/students` then `router.refresh()`; delete `window.confirm` → `DELETE /api/students/:id` and locally filter out.
+- **Components Used:** `Sidebar`, `KpiCard`, `StudentListGrid`, `StudentModal`, `CounselorDashboardClient`, `RiskBadge`/`getRiskMeta`, Chart.js `Bar`.
+- **Animations & Visual Transitions:**
+  - *Tab mount:* each tab root `animate-[fadeIn_0.3s_ease-in-out]` (overview/skills/pathways/management/data) or split-slide for prediction (`slideInLeft 0.4s ease-out` left panel + `slideInRight 0.4s ease-out` right panel).
+  - *Overview:* section cards staggered `slideUp 0.4s` at 0.2/0.3/0.35 s; list rows `slideUp 0.3s` inline-delayed `350 + idx*60 ms` and `400 + idx*60 ms`; row hovers `hover:bg-red-100/yellow-100 hover:shadow-sm hover:translate-x-1 transition-all duration-200`; KPI cards staggered by `delay` prop (0/100/200 ms) with `slideUp 0.4s`, `hover:shadow-md hover:-translate-y-0.5 duration-300`, inner bar width `transition-all duration-700 ease-out`, icon chip `hover:scale-110; skeleton-shimmer` while loading.
+  - *Chart:* Chart.js `animation: {duration: 800, easing: 'easeOutQuart'}`.
+  - *Prediction:* context card `scaleIn 0.3s`; combobox dropdown `fadeIn 0.2s`, filter chips `active:scale-95 transition-all duration-200`; chat bubbles `slideUp 0.3s anim-fill` per message, `hover:shadow-md` on bubbles; typing indicator = three `animate-bounce` dots (delays 0/0.2/0.4 s) → transition to a `animate-pulse` block caret while streaming; quick-prompt buttons `hover:bg-emerald/blue/purple-100 hover:shadow-sm active:scale-[0.98] disabled:opacity-50`; header avatar `floatSoft 3s infinite`; empty-state icon `fadeIn 0.5s` + `floatSoft 4s infinite`.
+  - *Skills table:* rows `slideUp 0.3s` at `150 + idx*40 ms`, `hover:bg-slate-50 duration-200`.
+  - *Pathways:* cards `slideUp 0.4s` at `100 + idx*80 ms`, `hover:shadow-md hover:-translate-y-1 duration-300`.
+  - *Data tab:* status chips `fadeIn 0.4s`; "Semasa" badge `fadeIn 0.3s`; ETL banner `animate-pulse` + `ph-spinner-gap animate-spin`; processing row keeps `bg-yellow-50/60` with `transition-colors duration-300`; skeleton rows `animate-pulse`; upload/disable state transitions.
+
+#### 4.3.a CounselorDashboardClient (src/components/dashboard/CounselorDashboardClient.jsx) — mounted as tab `counselor`
+- **Access Level:** staff; behavior dims by role (`isAdmin` shows all + reset action).
+- **Primary Function & User Flow:** PillTabs (Kalendar / Menunggu / Dijadualkan / Selesai / Dihantar / Semua, each with live counts) → `AppointmentCalendar` for Kalendar; report cards for the rest with contextual buttons: `Terima` (accepted), `Tolak` (rejected), `Jadualkan`/`Ubah Tarikh` opens schedule modal (datetime + notes; default tomorrow 09:00), `Selesai` opens complete modal (counselorNotes), `Set Semula` (**admin-only**, sends `action: "pending"` for completed/rejected). "Dihantar" lists `GET /api/student-reports` cards with type badge (Laporan Penuh/Surat/Mesej), preview, PDF link, and delete. Toast top-right 3 s.
+- **Components Used:** `PillTabs`, `Badge`, `EmptyState`, `SkeletonList`, `formatMsDate`, `AppointmentCalendar`.
+- **Animations:** toast `fadeIn 0.3s`; report cards `slideUp 0.3s anim-fill` staggered `index*50 ms`, `hover:shadow-md transition`; modals — overlay `fadeIn 0.2s` + `backdrop-blur-sm`, sheet `slideUp 0.3s`, full-screen on mobile with `safe-area-*` and sticky header/footer; action buttons `touch-target active:scale-95`; pending spinners `animate-spin`.
+
+---
+
+### 4.4 Student Dashboard (src/app/student-dashboard/page.jsx → StudentDashboardClient.jsx)
+
+- **Route:** `/student-dashboard`
+- **Access Level:** Student (`user`) only — middleware redirects staff here from `/student-dashboard` to `/staff-dashboard`.
+- **Primary Function & User Flow:**
+  1. Header on mobile (logo + burger). Sidebar tabs: **Profil & Prestasi**, **Kemaskini Sijil Saya**, **Laporan & Temujanji**, **Padanan Kerjaya (AI)**, **Kursus Cadangan**.
+  2. Data bootstrap: `/api/semesters` → active dataset (current-semester flag or latest); `/api/students?dataset=` — backend already restricts a bound student to a single-element array (extra client-side filter by `user.studentId` as belt-and-braces); selection auto-picks the first/kept id.
+  3. **Tab `dashboard`:** welcome row with avatar + risk pill (Tinggi red / Sederhana yellow / else green "Good Standing"); current-semester badge; 3 stat boxes (employability via heuristic, attendance, CGPA); radar chart (`skillGap.chart.current` vs target 80, dashed target line) with caption of `insight.message` (weakest-PLO AI commentary) and student selector (multi-student users only); dark "Peluang Kerjaya Teratas" card showing top 2 mapped jobs for the student's course code (static `careerMapping` dictionary, e.g. DFK → Cloud Engineer AWS / DevOps Maxis) + CTA to career tab.
+  4. **Tab `profile`:** profile-image circle upload (label wraps hidden file input; hover overlay "Tukar Gambar") → `POST /api/students/:id/profile-image` → optimistic state sync into `students` + `skillGap.student`; disabled identity fields (nama, ID, course); certificate form (nama, issuer, file PDF/PNG/JPG ≤ 5 MB) → `POST /api/students/:id/certificates`; certificate cards list with open-in-new-tab link + delete → `DELETE …/certificates/:certId`.
+  5. **Tab `reports`:** `MergedLaporanTab` (§4.4.b).
+  6. **Tab `career`:** full job grid `JobCard` per course mapping (title, company, match %, apply button).
+  7. **Tab `courses`:** two course cards; the "Disyorkan AI" one is derived from `skillGap.insight.weakestSkill` → `courseMappings[PLO x]` (title/desc/color per PLO); static second card "AWS Cloud Practitioner Essentials".
+- **Components Used:** `Sidebar` (with `profileImage`), `MergedLaporanTab`, `JobCard`, Chart.js `Radar`, `calculateEmployability`.
+- **Animations & Visual Transitions:** every tab root `animate-[fadeIn_0.3s_ease-in-out]` on mount; radar chart Chart.js default + options; avatar/hover transitions; camera overlay `group-hover:opacity-100` (opacity transition); dropzone `hover:bg-slate-100 transition`; certificate cards `hover:shadow-md transition` with red-hover delete; mobile sidebar = backdrop `bg-black/50` + panel slide (`transition-transform duration-300 ease-out`, `-translate-x-full ⇄ translate-x-0`), Escape closes, body scroll locked, backdrop `fadeIn 0.2s`; risk pill and buttons standard `transition` + `active:scale-95` on actions.
+
+#### 4.4.a MergedLaporanTab (src/components/dashboard/MergedLaporanTab.jsx)
+- **Access Level:** any authenticated caller; contents already role-scoped server-side (student → own, counselor → authored, admin → all).
+- **Primary Function & User Flow:** parallel `Promise.all` of `GET /api/student-reports` + `GET /api/reports/mine`, merged & sorted by `displayDate` desc via `normalizeLaporanItems`; filter pills (Semua/Laporan/Temujanji with counts); item rows show type icon tile (blue report / purple appointment), unread blue ring + dot, author/class metadata, priority "Segera" badge, relative timestamp, 2-line italic preview; opening a report marks it read (`GET /api/student-reports/:id` mutates `readByStudent`) and opens `StudentDetailModal` (message block + embedded PDF iframe + download/print); refresh button re-pulls.
+- **Animations:** unread badge `scaleIn 0.3s`; rows `slideUp 0.3s anim-fill` staggered `index*50 ms`, `touch-target active:scale-[0.98] hover:shadow-md`; `SkeletonList` shimmer rows while loading; `EmptyState` with `floatSoft` icon; modal per `StudentDetailModal` (`fadeIn` overlay + `slideUp` sheet + sticky download/print bar).
+
+---
+
+### 4.5 Student Profile — Staff deep view (src/app/student-profile/page.jsx → StudentProfileClient.jsx)
+
+- **Route:** `/student-profile?id=<ID_Pelajar>&dataset=<datasetName>&from=<originTab>` (defaults id `TVET001`, forwarded from server component `searchParams`).
+- **Access Level:** Staff (admin + counselor) — middleware enforcement. Students redirected away.
+- **Primary Function & User Flow:**
+  1. Loads `/api/students/:id/skill-gap?dataset=` (elicits fresh live AI prediction inside the backend and the weakest-PLO insight); `403 PASSWORD_CHANGE_REQUIRED` → hard redirect. Loading = full-page spinner; not found = inline "Pelajar tidak dijumpai."
+  2. **Left sticky identity card:** navy header bar with brand + `StatusBadge` risk chip; overlapping avatar (image or initial, `scaleIn`); name/monospaced ID/dataset badge "Sesi: <dataset>"; fact rows (Kursus full name via local course-name decoder, Semester, Sijil, Kehadiran); action trio: **Edit** (styled button, no-op placeholder), **Print** (`window.print()`), **Download** (assembles JSON blob `{studentDetails, academicHistory, aiInsight, employabilityScore, ploScores}` → `<a download>` click), plus full-width **"Jana Laporan / Surat"** button opening `GenerateReportModal`.
+  3. **Right card with 3 tabs:**
+     - `personal` — email (`<id>@student.ikmb.edu.my`), phone, No. KP, address (PII from the snapshot; only staff sees this page).
+     - `academic` — CGPA hero with color-coded progress bar (`emerald ≥3.5 / amber ≥2.5 / red`), `transition-all duration-700 ease-out` width; dual-axis combo chart GPA line + attendance bars from `academicHistory` (fallback to current single point), Chart.js `duration: 800 easeOutQuart`.
+     - `skills` — dark gradient "Ramalan Kebolehpasaran (AI)" card (heuristic score + `insight.message`, ghost `magic-wand` watermark floating), PLO radar (current vs target; "DATA PLO BELUM LENGKAP" chip if any score 0), and **staff-only** 3 intervention referral cards (Kaunseling / Klinik Akademik / Soft Skills) each opening `ReportFormModal` with the chosen `interventionType`.
+  4. Breadcrumb "Senarai Pelajar / <name>" — back button restores the originating staff tab + dataset via `?from`/`?dataset` params → `router.push('/staff-dashboard?tab=…&dataset=…')`.
+- **Components Used:** `ReportFormModal`, `GenerateReportModal`, Chart.js `Bar` + `Radar`, local `StatusBadge`, ` getClientUser`/`getClientToken`.
+- **Animations & Visual Transitions:** page `fadeIn 0.4s ease-out`; left card `slideInLeft 0.5s ease-out 0.1s anim-fill`, right card `slideInRight 0.5s ease-out 0.15s anim-fill`; avatar `scaleIn 0.4s ease-out 0.3s`; tabs use active bottom-border + `transition-all duration-200`; each tab content `fadeIn 0.3s` with inner blocks `slideUp 0.4s` staggered 0/0.1/0.15/0.2/0.3/0.4 s; intervention cards `hover:shadow-md hover:-translate-y-0.5 duration-300`; water-mark icon `floatSoft 4s infinite`; status chip `scaleIn`; progress bars width-transition 700 ms; all profile-page charts share Chart.js `easeOutQuart` entrances.
+
+#### 4.5.a ReportFormModal & GenerateReportModal (src/components/ReportFormModal.jsx, GenerateReportModal.jsx)
+- **Access Level:** staff (mounted from profile; backend enforces `requireStaff`).
+- **Primary Function & User Flow:** both are mobile-full / desktop-centered sheets attached to the profile page.
+  - `ReportFormModal` (referral): pulls counselor roster (`GET /api/auth/users` → filter role `counselor`, preselect first), pre-fills datetime = tomorrow 09:00, priority segmented toggle (Normal/Segera), mandatory reason, optional attachment (PDF/JPG/PNG ≤ 5 MB with live preview via `useFilePreview` + `AttachmentPreview`), posts multipart `POST /api/reports`; success toast auto-closes at 1.5 s.
+  - `GenerateReportModal` (student report/letter): title pre-filled "Laporan Prestasi & Intervensi: <name>", message body, **PDF-only** attachment, serialises `ploScores` JSON from the skill-gap chart, computes `employability`, posts `POST /api/student-reports`; toast + auto-close. Reset behavior triggered only on the closed→open transition (ref-guarded effect).
+- **Animations:** overlay `fadeIn 0.2s` + blur; sheet `slideUp 0.3s`; dropzone dashed `hover:bg-slate-100`; attachment chip `scaleIn 0.2s`; toast `scaleIn 0.2s`; submit spinner `animate-spin`; sticky footer `pb-safe`.
+
+---
+
+### 4.6 Machine-Readable Route/Table Summary
+
+| Route | File | Access | Notable interactive behaviors |
+| :--- | :--- | :--- | :--- |
+| `/` | `src/app/page.jsx` → `LoginForm.jsx` | Public | Server-Action login, cookie bootstrap, forgot-password wizard, demo autofill |
+| `/change-password` | `change-password/page.jsx` → `ChangePasswordForm.jsx` | All (forced if `mcp`) | Live policy meter, cookie rotation on success |
+| `/staff-dashboard` | `staff-dashboard/page.jsx` → `StaffDashboardClient.jsx` | Admin, Counselor | 7 tabs, AI SSE chat, ETL polling, KPI/chart analytics, student CRUD |
+| `/student-dashboard` | `student-dashboard/page.jsx` → `StudentDashboardClient.jsx` | Student | 5 tabs, radar, certificates, inbox, career, recommended courses |
+| `/student-profile` | `student-profile/page.jsx` → `StudentProfileClient.jsx` | Staff only | Identity card, 3 tabs, referral/report modals, print/JSON export |
+| `/api/docs` (backend port) | `backend/server.js` | public | Swagger UI generated from JSDoc |
+
+---
+
+## 5. Data Flow & State Lifecycles
+
+### 5.1 Authentication & Session (cookie pair)
+
+1. `loginAction` (Server Action) → backend `JWT` response` → SSR sets:
+   - `user` — **not HttpOnly** (readable by UI/middleware helpers), JSON `{email, role, displayName, studentId}`, maxAge 24 h, `secure` in production;
+   - `ikmbToken` — **HttpOnly**, SameSite=Lax, secure in prod, 24 h. JWT itself carries the authoritative claims `{email, role, studentId, mcp, pwdAt}` with 8 h expiry (the longer cookie maxAge is harmless because the backend rejects expired/rotated tokens, though note the asymmetry: a stale readable cookie alone cannot authenticate anything).
+2. Every subsequent request resolves identity from:
+   - *Server components / middleware:* JWT verify (middleware) or `user` cookie (RSC helpers);
+   - *Client components:* `getClientUser()` (deserialized `user` cookie); token never touched client-side.
+3. Password change rotates **both** cookies and bumps `passwordChangedAt`; backend middleware kills any older-token request (`pwdAt < changedAt` → 401); forced-change accounts are functionally quarantined (403 whitelist) until they comply.
+4. Logout deletes both cookies via `logoutAction` (no server-side revocation list — a stolen token dies naturally at 8 h or at next password change).
+
+### 5.2 Read path (backend → component)
+
+```
+MongoDB ──▶ Mongoose model ──▶ item.model.js normaliseStudent()
+   (sourceDataset-scoped query; isCurrentSemester → fallback latest processed)
+      ──▶ Express route (/api/students*, /api/reports*, /api/student-reports*)
+             (role scoping inside route handler)
+                ──▶ GET /api/<path> from browser
+                      ──▶ Next.js catch-all proxy (inject Bearer from cookie)
+                             ──▶ client useEffect → useState (per-dashboard copy)
+```
+
+- The skill-gap pipeline is the one server-computed composite: `getStudentSkillGapById` re-runs a **live ML prediction** (`getRealAIPrediction`) each time it is opened, overrides `student.dropoutRisk`, then builds `{chart:{labels,current,target}}` (target = 80 across PLO 1–9) and the weakest-PLO `insight` text ("belum direkodkan" message when weakest value is 0).
+- Frontend persistence of context is only in the URL (`?dataset`, `?tab`, `?from`, `?id`) — nothing is persisted in `localStorage`/`sessionStorage` anywhere in the codebase.
+- Error surfacing: every dashboard specifically recognises `403 { code: "PASSWORD_CHANGE_REQUIRED" }` and navigates clients to `/change-password`.
+
+### 5.3 Write paths
+
+| Action | Flow |
+| :--- | :--- |
+| **Student CRUD (staff)** | `StudentModal` → JSON → `POST/PUT/DELETE /api/students/:id` → `updateStudent` applies `$set` to **all** semester snapshots of that `ID_Pelajar`; DELETE removes snapshots + all `User` docs bound to that ID. |
+| **Certificates / avatar** | FormData → ownership check → multer (≤ 5 MB, pdf/jpg/png) → `Student.updateMany({ID_Pelajar}, {$push|$set})` so the asset appears in **every** snapshot; delete resolves physical path with an uploads-root containment check before `fs.unlinkSync`. |
+| **Referral (Report)** | Profile page → `ReportFormModal` multipart → multer `uploads/referrals` → validation (fields, enum, date, counselor exists; on any failure `safeUnlink`) → `Report` saved `pending` → counselor acts (accept/schedule/complete/reject/reset) through the PATCH state machine → student sees accepted/scheduled items via `/api/reports/mine`. |
+| **Student report (inbox)** | Profile page → `GenerateReportModal` multipart (PDF attachment optional) → `uploads/reports` → `StudentReport` (`reportType` derived) → unread until the student opens it (`readByStudent` flip on GET/:id). |
+| **Student password recovery** | No email channel: identity proof (`ID_Pelajar` + digit-normalised `No_KP` matched against `Student`) → `createPasswordResetToken` (audience-isolated, pwdAt-bound) → `resetPasswordWithToken` enforces policy + replay protection (pwdAt binding) → `mustChangePassword=false`, sessions/older tokens invalidated via `passwordChangedAt=new Date()`. |
+| **Admin password reset** | `POST /api/auth/reset-password` → 12-char base64url temp password returned **once** in the response; account flagged `mcp` → recipient is forced to set a real password on first login. |
+
+### 5.4 ETL & dataset lifecycle (the most stateful flow)
+
+```
+Admin (tab data) ── upload .mdb ─▶ POST /api/data/upload-mdb
+                                   └ MdbFile{status:"Saved"} + binary kept at backend/uploads/mdb/
+Admin ── process ─▶ POST /api/data/process-mdb/:id
+   ├ guard: not already "Processing" (409), file exists
+   ├ executeEtlAndSync:
+   │   1. MdbFile → "Processing"                       (UI starts 3s polling)
+   │   2. POST ml_service /etl/process-mdb  (X-API-Key) ── mdbtools ETL returns student rows
+   │   3. POST ml_service /predict/batch               ── Status_Pelajar per row (skip silently if AI down)
+   │   4. Asset carry-forward map built from existing Student docs
+   │      (profileImage, uploadedCertificates → STUDENT-level, not semester-level)
+   │   5. bulkWrite Student upserts  filter {ID_Pelajar, sourceDataset}  ← compound key = new semester snapshot each process
+   │   6. bulkWrite User upserts  $set {role:"user", displayName, studentId}
+   │      $setOnInsert {password: 32-chr random bcrypt, mustChangePassword:true}  ← never overwrites exist users' passwords
+   │   7. MdbFile → "Processed" + recordsProcessed + processedDate
+   │      (crash path → "Failed"; boot recovery resets stuck "Processing" → "Saved")
+   └ Admin can flag exactly one dataset isCurrentSemester (PATCH /data/set-current-semester) →
+     drives default selection for staff + student dashboards and dataset resolution in item.model.js
+```
+
+- Reads always filter `Student.sourceDataset = <dataset>`; absent filter resolution never mixes datasets (empty array if nothing processed).
+- AI risk normalisation on read (rules override AI label when attendance/CGPA breach thresholds) — see `item.model.js:normaliseStudent`.
+- Offline tooling: `repredict-status.js` (batch re-run predictions), `sync-student-assets.js` (asset healing), `diagnostics.js` (mongosh inspection of counts/duplicates/ledger), seed scripts.
+
+### 5.5 Global vs local state recap
+
+| Concern | Where it lives |
+| :--- | :--- |
+| Identity/role | `user` cookie (read-only UI use) + JWT claims (validation use) |
+| Session credential | `ikmbToken` HttpOnly cookie; injected by proxy; never client-readable |
+| Active tab | `activeTab` useState + `?tab=` URL param on staff dashboard |
+| Active dataset/semester | `activeDataset` useState + `?dataset=` URL param; server default = flagged current semester |
+| Profile context crossing pages | `?id&dataset&from` params carried into `/student-profile` and back |
+| Dashboard data (students, reports, skillGap, mdbFiles…) | local `useState` per dashboard client; refetch on relevant deps; **no store, no cache layer, no sessionStorage** |
+| Streaming chat transcript | local `aiMessages` array with progressive last-message updates |
+| Upload previews | `URL.createObjectURL` in `useFilePreview` (revoked on change/unmount) — transient only |
+
+---
+
+**Last Updated:** 2026-10-26 10:06:00 UTC+8

@@ -7,6 +7,14 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
+  # --- 0. REPOSITORY HYGIENE (File-2 gate) ---
+  repository-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tracked files and environment templates
+        run: python3 scripts/check-repository.py
+
   # --- 1. FRONTEND TEST & BUILD (Next.js 15 SSR) ---
   frontend:
     runs-on: ubuntu-latest
@@ -23,15 +31,24 @@ jobs:
       - name: Build Frontend (Next.js SSR)
         env:
           BACKEND_URL: http://backend:5000
-          # 🔐 REQUIRED: Next.js Edge Middleware needs this to compile/run
           JWT_SECRET: "ci-dummy-jwt-secret-for-build-only"
           JWT_ISSUER: "tvetmara-backend"
           JWT_AUDIENCE: "tvetmara-dashboard"
         run: npm run build
 
-  # --- 2. BACKEND TEST (Express + Jest) ---
+  # --- 2. BACKEND TEST (Express + Jest, Redis service for career cache) ---
   backend:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 2s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
@@ -45,13 +62,12 @@ jobs:
         run: npm install
       - name: Run Backend Tests (Jest + Supertest)
         env:
-          # 🔐 REQUIRED: authMiddleware.js throws if JWT_SECRET is missing
           JWT_SECRET: "ci-dummy-jwt-secret-for-testing"
           JWT_ISSUER: "tvetmara-backend"
           JWT_AUDIENCE: "tvetmara-dashboard"
-          # 🔐 REQUIRED: If backend tests hit the ML API or item.model.js
           ML_API_SECRET: "ci-dummy-ml-secret"
           ML_API_URL: "http://localhost:8000"
+          CAREER_TEST_REDIS_URL: redis://127.0.0.1:6379/15
         run: npm test
 
   # --- 3. ML SERVICE TEST (FastAPI + Pytest) ---
@@ -72,13 +88,12 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run ML Tests (Pytest)
         env:
-          # 🔐 REQUIRED: ml.py calls sys.exit(1) if this is missing on import
           ML_API_SECRET: ${{ secrets.ML_API_SECRET }}
         run: pytest test_ml.py
 
-  # --- 4. DOCKER BUILD (Only if all tests pass) ---
+  # --- 4. DOCKER BUILD (only if all tests pass) ---
   docker-build:
-    needs: [frontend, backend, ml-service]
+    needs: [repository-hygiene, frontend, backend, ml-service]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

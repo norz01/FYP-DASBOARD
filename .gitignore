@@ -53,3 +53,15 @@ security-audit-results/
 *.sln
 *.sw?
 .idea/
+.env
+.env.local
+backend/.env
+mongodb_data/
+backend/uploads/
+backend/db/mdb_extracted/
+backend/db/data_tvet_muktamad.json
+
+# Generated build and tool caches
+.next/
+__pycache__/
+*.pyc

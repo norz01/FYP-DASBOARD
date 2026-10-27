@@ -13,6 +13,7 @@ import authRouter from "./auth.js";
 import itemsRouter from "./items.js";
 import reportsRouter from "./reports.js";
 import studentReportsRouter from "./studentReports.js";
+import careersRouter from "./careers.js";
 import MdbFile from "./models/MdbFile.js";
 
 dotenv.config();
@@ -112,6 +113,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/api/student-reports", studentReportsRouter);
+app.use("/api/careers", careersRouter);
 app.use("/api", itemsRouter);
 
 // F-1 & F-3: Global error handler (No stack traces in production)
