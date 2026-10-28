@@ -1,5 +1,5 @@
 # ML/Containerfile
-FROM docker.io/python:3.9-slim
+FROM docker.io/python:3.11-slim
 
 # Pasang mdbtools (diperlukan oleh skrip Python untuk mengekstrak fail .mdb)
 RUN apt-get update && apt-get install -y mdbtools && rm -rf /var/lib/apt/lists/*
